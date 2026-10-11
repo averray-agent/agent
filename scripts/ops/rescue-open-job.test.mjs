@@ -16,6 +16,8 @@ import {
   parseArgs,
   refundableTotal,
   resolveEscrowTarget,
+  findJobCreated,
+  findRescueRejection,
   runRescue,
   validateArgs
 } from "./rescue-open-job.mjs";
@@ -41,6 +43,31 @@ const JOB_ABI = [
   "function finalizeRejectedJob(bytes32 jobId)"
 ];
 const iface = new Interface(JOB_ABI);
+
+for (const kind of ["creation", "rejection"]) test(`rescue ${kind} uses receipt-canonical evidence across duplicate/phantom log responses`, async () => {
+  const events = new Interface([
+    "event JobCreated(bytes32 indexed jobId,address indexed poster,bytes32 indexed specHash,address asset,uint256 totalReserved,uint8 payoutMode)",
+    "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"
+  ]);
+  const encoded = kind === "creation"
+    ? events.encodeEventLog(events.getEvent("JobCreated"), [JOB_ID, POSTER, TOMBSTONE_HASH, TOKEN, 100, 0])
+    : events.encodeEventLog(events.getEvent("JobRejected"), [JOB_ID, REASON_OPERATOR_RESCUE]);
+  const real = { ...encoded, address: ESCROW, transactionHash: PLAN_HASH, index: 45, blockNumber: 20, blockHash: TOMBSTONE_HASH };
+  const phantom = { ...real, blockNumber: 15, blockHash: WRONG_HASH };
+  let noisy = false;
+  const messages = [];
+  const provider = {
+    getTransactionReceipt: async () => ({ hash: PLAN_HASH, blockNumber: 20, blockHash: TOMBSTONE_HASH, logs: [real] }),
+    getBlock: async hash => { assert.equal(hash, TOMBSTONE_HASH); return { number: 20, hash, timestamp: 1000 }; },
+    getLogs: async ({ fromBlock }) => kind === "creation" && fromBlock < 20 ? (noisy ? [phantom] : []) : (noisy ? [phantom, real, real] : [real])
+  };
+  const options = { provider, escrowAddress: ESCROW, jobId: JOB_ID, fromBlock: 10, toBlock: 29, chunkSize: 10, log: m => messages.push(m) };
+  const read = kind === "creation" ? findJobCreated : findRescueRejection;
+  const clean = await read(options); noisy = true; const duplicated = await read(options);
+  assert.deepEqual(duplicated, clean);
+  assert.equal(clean.blockNumber, 20); assert.equal(clean.logIndex, 45); assert.equal(clean.timestamp, 1000);
+  assert.ok(messages.some(m => m.includes("phantomLogsDropped=1")));
+});
 
 function args(overrides = {}) {
   return {

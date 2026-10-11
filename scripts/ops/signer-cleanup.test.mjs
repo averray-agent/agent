@@ -308,13 +308,15 @@ test("fairness prints rejection event evidence and backend verdict, with actual 
   const iface = new Interface(["event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)", "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"]);
   const reason = id("footer_missing"), reasoningHash = id("reasoning"), queries = [];
   const logs = [iface.encodeEventLog(iface.getEvent("Verified"), [r.jobId, ADDRESSES.signer, false, reason, reasoningHash]),
-    iface.encodeEventLog(iface.getEvent("JobRejected"), [r.jobId, reason])].map(l => ({ ...l, address: ADDRESSES.v3, blockNumber: 10, transactionHash: id("tx") }));
-  const provider = { getBlock: async number => ({ number, timestamp: number * 10 }), getLogs: async query => { queries.push(query); return logs; } };
+    iface.encodeEventLog(iface.getEvent("JobRejected"), [r.jobId, reason])].map((l, index) => ({ ...l, index, address: ADDRESSES.v3, blockNumber: 10, transactionHash: id("tx") }));
+  const provider = { getBlock: async number => ({ number, timestamp: number * 10 }),
+    getTransactionReceipt: async () => ({ hash: id("tx"), blockNumber: 10, logs }),
+    getLogs: async query => { queries.push(query); return logs; } };
   const evidence = await readRejectionEvidence(provider, r, job, { number: 20 }, async () => ({ sessionId: "session", verification: { reason: "footer missing", reasonCode: "footer_missing" } }));
   assert.equal(evidence.chain.status, "available"); assert.equal(evidence.backend.sessionId, "session"); assert.equal(evidence.backend.verdictReason, "footer missing");
   assert.deepEqual(queries[0], { address: ADDRESSES.v3, fromBlock: 10, toBlock: 10, topics: [[iface.getEvent("Verified").topicHash, iface.getEvent("JobRejected").topicHash], r.jobId] });
   assert.deepEqual(evidence.chain.events[0], { event: "Verified", reasonCode: reason, reasoningHash, verifier: ADDRESSES.signer,
-    verifierSource: "event", block: 10, blockTime: "1970-01-01T00:01:40.000Z", transactionHash: id("tx") });
+    verifierSource: "event", block: 10, blockTime: "1970-01-01T00:01:40.000Z", logIndex: 0, transactionHash: id("tx") });
   const treasury = `0x${"7".repeat(40)}`, split = slashDistribution(r, job, treasury, 7000);
   assert.deepEqual(split.stake, { totalRaw: "77", posterWallet: job.poster, posterWalletRaw: "38", treasuryAccount: treasury, treasuryAacRaw: "39" });
   assert.deepEqual(split.fee, { totalRaw: "11", verifierWallet: ADDRESSES.signer, verifierWalletRaw: "7", treasuryAccount: treasury, treasuryAacRaw: "4" });
@@ -347,6 +349,44 @@ test("chain reader binds per-row fairness and live slash policy into the reviewe
   assert.equal(result.fairness.backend.sessionId, "session"); assert.equal(result.fairness.backend.verdictReasonCode, "REJECTED");
   assert.equal(result.fairness.chain.status, "incomplete");
   assert.equal(result.fairness.slashes.fee.verifierWalletRaw, "7"); assert.equal(result.fairness.slashes.stake.treasuryAccount, treasury);
-  assert.deepEqual(result.preState.fairness, result.fairness);
+  const { phantomLogsDropped, ...canonicalFairness } = result.fairness;
+  assert.equal(phantomLogsDropped, 0);
+  assert.deepEqual(result.preState.fairness, canonicalFairness);
   assert.ok(reads.includes("claimFeeVerifierBps")); assert.ok(reads.includes("treasuryAccount"));
+});
+
+test("phantom and duplicate rejection logs cannot change the reviewed plan or send-time pre-state", async () => {
+  const r = manifest.rows.find(r => r.jobId?.startsWith("0x3aacf564"));
+  const tx = "0x6219133188f307f431c708eb0b70e8c8461e5b5ffd426c647f8ce9be86ae0f4a";
+  const receiptBlock = 19347505, phantomBlock = 19347500, blockHash = id("receipt block");
+  const iface = new Interface(ESCROW_CORE_ABI);
+  const s = snapshot("B", { job: { rejectingVerifier: ADDRESSES.signer } });
+  const logs = [iface.encodeEventLog(iface.getEvent("Verified"), [r.jobId, ADDRESSES.signer, false, id("reason"), id("reasoning")]),
+    iface.encodeEventLog(iface.getEvent("JobRejected"), [r.jobId, id("reason")])]
+    .map((l, i) => ({ ...l, address: ADDRESSES.v2, transactionHash: tx, index: 45 + i, blockNumber: receiptBlock, blockHash }));
+  const phantom = logs.map(l => ({ ...l, blockNumber: phantomBlock, blockHash: id("phantom block") }));
+  let noise = false, receiptReads = 0;
+  const provider = {
+    getBlock: async tag => {
+      const number = tag === blockHash ? receiptBlock : tag;
+      return { number, hash: number === receiptBlock ? blockHash : id(String(number)),
+        timestamp: number < phantomBlock ? 99 : number <= receiptBlock ? 100 : 101 };
+    },
+    getTransactionReceipt: async hash => { assert.equal(hash, tx); receiptReads++; return { hash: tx, blockNumber: receiptBlock, blockHash, logs }; },
+    getLogs: async () => noise ? [phantom[1], logs[1], logs[0], phantom[0], logs[0]] : logs
+  };
+  const read = async () => classify(r, { ...s, fairness: await readRejectionEvidence(provider, r, s.job,
+    { number: receiptBlock + 10 }, undefined, phantomBlock - 10) });
+  const clean = await read(); noise = true; const noisy = await read();
+  assert.equal(receiptReads, 2, "one receipt read per transaction per observation");
+  assert.equal(clean.phantomLogsDropped, 0); assert.equal(noisy.phantomLogsDropped, 2);
+  assert.deepEqual(noisy.fairness.chain.events.map(e => [e.block, e.logIndex, e.blockTime]),
+    [[receiptBlock, 45, "1970-01-01T00:01:40.000Z"], [receiptBlock, 46, "1970-01-01T00:01:40.000Z"]]);
+  assert.deepEqual(noisy.preState.job, s.job, "job chain state remains fully bound");
+  assert.equal(buildPlan([clean], position).planHash, buildPlan([noisy], position).planHash);
+  const h = harness([clean]); h.io.read = async () => noisy;
+  await executePlan(h.plan, commitArgs(h.plan), h.io);
+  assert.equal(h.sent.length, 1, "RPC noise must not skip a reviewed ready row");
+  const changed = structuredClone(noisy); changed.preState.job.claimStake = "999";
+  assert.notEqual(h.plan.planHash, buildPlan([changed], position).planHash);
 });

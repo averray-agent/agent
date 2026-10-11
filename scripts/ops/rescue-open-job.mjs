@@ -23,6 +23,7 @@ import {
 } from "./ceremony-rpc.mjs";
 import { loadKeyFromOp } from "./redeploy-escrowcore.mjs";
 import { assertAllowedId, hash as cleanupHash } from "./signer-cleanup.mjs";
+import { canonicalReceiptLogs, receiptLogScan } from "./canonical-receipt-logs.mjs";
 
 export const MIN_OPEN_AGE_SECONDS = 60 * 60;
 export const REASON_OPERATOR_RESCUE = encodeBytes32String("OPERATOR_RESCUE");
@@ -241,28 +242,30 @@ export async function findJobCreated({
     throw new Error(`JobCreated scan starts at ${fromBlock}, above chain head ${head}.`);
   }
   const chunks = Math.ceil((head - fromBlock + 1) / chunkSize);
+  const scan = receiptLogScan();
   for (let cursor = fromBlock, index = 1; cursor <= head; cursor += chunkSize, index += 1) {
     const end = Math.min(head, cursor + chunkSize - 1);
     log(`JobCreated scan ${index}/${chunks}: blocks ${cursor}-${end}`);
-    const logs = await provider.getLogs({
+    const rawLogs = await provider.getLogs({
       address: escrowAddress,
       fromBlock: cursor,
       toBlock: end,
       topics: [event.topicHash, jobId]
     });
+    const { events: logs, phantomLogsDropped } = await canonicalReceiptLogs(provider, rawLogs, scan);
+    log(`JobCreated ${jobId}: phantomLogsDropped=${phantomLogsDropped} blocks=${cursor}-${end}`);
     if (logs.length > 1) {
       throw new Error(`Found ${logs.length} JobCreated events for ${jobId} in one escrow; refusing ambiguity.`);
     }
     if (logs.length === 1) {
       const parsed = ESCROW_INTERFACE.parseLog(logs[0]);
       if (!parsed) throw new Error("Matched JobCreated topic could not be decoded.");
-      const block = await provider.getBlock(logs[0].blockNumber);
-      if (!block) throw new Error(`Could not read JobCreated block ${logs[0].blockNumber}.`);
       return {
         blockNumber: logs[0].blockNumber,
         blockHash: logs[0].blockHash,
         transactionHash: logs[0].transactionHash,
-        timestamp: Number(block.timestamp),
+        logIndex: logs[0].logIndex,
+        timestamp: logs[0].timestamp,
         poster: getAddress(parsed.args.poster),
         specHash: parsed.args.specHash
       };
@@ -271,14 +274,16 @@ export async function findJobCreated({
   throw new Error(`No JobCreated event found for ${jobId} from deployment block ${fromBlock}.`);
 }
 
-export async function findRescueRejection({ provider, escrowAddress, jobId, fromBlock, toBlock }) {
+export async function findRescueRejection({ provider, escrowAddress, jobId, fromBlock, toBlock, log = () => {} }) {
   const event = ESCROW_INTERFACE.getEvent("JobRejected");
-  const logs = await provider.getLogs({
+  const rawLogs = await provider.getLogs({
     address: escrowAddress,
     fromBlock,
     toBlock: toBlock ?? "latest",
     topics: [event.topicHash, jobId]
   });
+  const { events: logs, phantomLogsDropped } = await canonicalReceiptLogs(provider, rawLogs);
+  log(`JobRejected ${jobId}: phantomLogsDropped=${phantomLogsDropped}`);
   const matching = logs
     .map((entry) => ({ entry, parsed: ESCROW_INTERFACE.parseLog(entry) }))
     .filter(({ parsed }) => parsed && parsed.args.reasonCode.toLowerCase() === REASON_OPERATOR_RESCUE.toLowerCase());
@@ -289,6 +294,8 @@ export async function findRescueRejection({ provider, escrowAddress, jobId, from
   }
   return {
     blockNumber: matching[0].entry.blockNumber,
+    logIndex: matching[0].entry.logIndex,
+    timestamp: matching[0].entry.timestamp,
     transactionHash: matching[0].entry.transactionHash,
     reasonCode: matching[0].parsed.args.reasonCode
   };
@@ -533,7 +540,8 @@ async function readSnapshot({
       escrowAddress: target.address,
       jobId,
       fromBlock: creation.blockNumber,
-      toBlock: head.number
+      toBlock: head.number,
+      log
     });
   }
   return {
