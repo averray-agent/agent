@@ -7,10 +7,10 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { Interface, id } from "ethers";
 import YAML from "js-yaml";
-import { ESCROW_CORE_ABI } from "../../mcp-server/src/blockchain/abis.js";
+import { ESCROW_CORE_ABI, AGENT_ACCOUNT_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { ADDRESSES, COLD_POSTER, DENYLIST, STRATEGY_ID, EVENTS, assertAllowedId, assertCommit, assertNonceIdle,
   buildPlan, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
-  readRejectionEvidence, slashDistribution, createReader } from "./signer-cleanup.mjs";
+  readRejectionEvidence, slashDistribution, createReader, simulateReadyRow } from "./signer-cleanup.mjs";
 import { parseArgs as rescueArgs, runRescueBatch, rescueBatchHash, sendCall } from "./rescue-open-job.mjs";
 
 const exec = promisify(execFile);
@@ -23,7 +23,7 @@ const snapshot = (bucket, patch = {}) => bucket === "C" ? {
   now, shares: 37n, totalAssets: 1000n, totalShares: 100n, buffer: 1000n,
   active: true, async: false, paused: false, bindingsValid: true, ...patch
 } : {
-  now, paused: false, bindingsValid: true, retired: true, createdAt: 1, minOpenAge: 3600, disputeWindow: 604800,
+  now, paused: false, bindingsValid: true, escrowIsAacOperator: true, retired: true, createdAt: 1, minOpenAge: 3600, disputeWindow: 604800,
   job: { state: { A: 1, B: 4, "B'": 4, D: 2 }[bucket], poster: bucket === "B'" ? COLD_POSTER : ADDRESSES.signer,
     worker: `0x${"1".repeat(40)}`, asset: ADDRESSES.asset, reward: "400000", released: "0", protocolFee: "100", protocolFeeReleased: "0",
     opsReserve: "30", contingencyReserve: "20", claimStake: "77", claimFee: "11", rejectedAt: 100, claimExpiry: 200,
@@ -34,7 +34,7 @@ const commitArgs = plan => ({ expectedPlanHash: plan.planHash, confirm: `CLEANUP
 function harness(rows = [ready("A"), ready("B")]) {
   const plan = buildPlan(rows, position), sent = [], logs = [];
   const io = { now: () => 0, read: async r => rows.find(x => x.row === r), position: async () => position,
-    log: v => logs.push(v), assertNonceIdle: async () => {},
+    log: v => logs.push(v), assertNonceIdle: async () => {}, simulate: async row => row,
     send: async call => { sent.push(call); return { hash: "0xtx", nonce: 8, wait: async (confirmations, timeout) => {
       assert.equal(confirmations, 1); assert.ok(timeout > 0 && timeout <= 60_000); return { status: 1 };
     } }; },
@@ -331,16 +331,26 @@ test("chain reader binds per-row fairness and live slash policy into the reviewe
   const policy = `0x${"5".repeat(40)}`, treasury = `0x${"7".repeat(40)}`;
   const iface = new Interface([...ESCROW_CORE_ABI, "function policy() view returns (address)",
     "function paused() view returns (bool)", "function treasuryAccount() view returns (address)",
-    "function claimFeeVerifierBps() view returns (uint16)", "function DISPUTE_WINDOW() view returns (uint256)"]);
+    "function claimFeeVerifierBps() view returns (uint16)", "function DISPUTE_WINDOW() view returns (uint256)",
+    "function escrowOperators(address) view returns (bool)"]);
   const components = iface.getFunction("jobs").outputs[0].components;
   const fixture = snapshot("B", { job: { rejectingVerifier: ADDRESSES.signer } }).job;
   const job = Object.fromEntries(components.map(c => [c.name, fixture[c.name] ?? (c.type === "bool" ? false : c.type === "bytes32" ? id(c.name) : 0)]));
-  const reads = [];
+  const reads = [], simulations = []; let authorized = true, simulationError;
   const provider = { getBlock: async n => ({ number: n === "latest" ? 200000 : n, timestamp: n === "latest" ? now : n * 10 }),
     getLogs: async () => [], call: async tx => {
       const fn = iface.parseTransaction(tx).name; reads.push(fn);
+      if (fn === "finalizeRejectedJob") {
+        simulations.push(tx);
+        if (simulationError) throw simulationError;
+        return "0x";
+      }
       const values = { jobs: job, accounts: ADDRESSES.aac, policy, paused: false, treasuryAccount: treasury,
-        claimFeeVerifierBps: 7000, DISPUTE_WINDOW: 604800 };
+        claimFeeVerifierBps: 7000, DISPUTE_WINDOW: 604800, escrowOperators: authorized };
+      if (fn === "escrowOperators") {
+        assert.equal(tx.to.toLowerCase(), ADDRESSES.aac.toLowerCase());
+        assert.equal(iface.parseTransaction(tx).args[0], ADDRESSES.v3); assert.equal(tx.blockTag, 200000);
+      }
       assert.ok(fn in values, fn); return iface.encodeFunctionResult(fn, [values[fn]]);
     } };
   const reader = await createReader(provider, { contracts: { treasuryPolicy: policy }, deploymentBlocks: { escrowCore: 1 } },
@@ -353,6 +363,69 @@ test("chain reader binds per-row fairness and live slash policy into the reviewe
   assert.equal(phantomLogsDropped, 0);
   assert.deepEqual(result.preState.fairness, canonicalFairness);
   assert.ok(reads.includes("claimFeeVerifierBps")); assert.ok(reads.includes("treasuryAccount"));
+  assert.equal(result.preState.escrowIsAacOperator, true);
+  assert.equal(simulations.length, 1); assert.equal(simulations[0].from, ADDRESSES.signer); assert.equal(simulations[0].blockTag, 200000);
+  assert.equal(result.simulation.result, "success");
+  await reader.simulate(result);
+  assert.equal(simulations[1].blockTag, "latest");
+  simulationError = Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION", data: "0x82b42900" });
+  const reverted = await reader.read(row("B"));
+  assert.equal(reverted.status, "blocked"); assert.equal(reverted.reason, "simulation_reverted:Unauthorized()");
+  assert.equal(reverted.expectedBankLiquidRaw, "0");
+  authorized = false;
+  const callsBefore = simulations.length, revoked = await reader.read(row("B"));
+  assert.equal(revoked.reason, "escrow_not_aac_operator"); assert.equal(revoked.preState.escrowIsAacOperator, false);
+  assert.equal(simulations.length, callsBefore, "revoked rows are never simulated as ready");
+});
+
+test("every escrow row is blocked without AAC operator authorization and binds that value in pre-state", () => {
+  for (const r of manifest.rows.filter(r => r.bucket !== "C")) {
+    const s = snapshot(r.bucket, { escrowIsAacOperator: false });
+    const result = classify(r, s);
+    assert.equal(result.status, "blocked"); assert.equal(result.reason, "escrow_not_aac_operator");
+    assert.equal(result.preState.escrowIsAacOperator, false);
+    assert.equal(result.expectedBankLiquidRaw, "0"); assert.equal(result.expectedColdLiquidRaw, "0");
+  }
+});
+
+test("ready-row simulation uses exact call, signer and observed block; decodes custom errors and require strings", async () => {
+  const errors = new Interface(["error Unauthorized()", "error InvalidState()"]);
+  for (const bucket of ["A", "B", "B'", "C"]) {
+    const candidate = { ...ready(bucket), observation: { block: 123 } };
+    let request;
+    const passed = await simulateReadyRow({ call: async tx => { request = tx; return "0x"; } }, candidate);
+    const iface = new Interface(bucket === "C" ? AGENT_ACCOUNT_ABI : ESCROW_CORE_ABI);
+    assert.deepEqual(request, { to: candidate.call.to, from: ADDRESSES.signer,
+      data: iface.encodeFunctionData(candidate.call.function, candidate.call.args), blockTag: 123 });
+    assert.equal(passed.status, "ready"); assert.equal(passed.simulation.result, "success");
+    for (const [name, args, decoded] of [["Unauthorized", [], "Unauthorized()"], ["InvalidState", [], "InvalidState()"], ["Error", ["INSUFFICIENT_STAKE"], 'Error("INSUFFICIENT_STAKE")']]) {
+      const provider = { call: async () => { throw Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION", data: errors.encodeErrorResult(name, args) }); } };
+      const blocked = await simulateReadyRow(provider, candidate);
+      assert.equal(blocked.status, "blocked"); assert.equal(blocked.reason, `simulation_reverted:${decoded}`);
+      assert.equal(blocked.expectedBankLiquidRaw, "0"); assert.equal(blocked.expectedBankReservedRaw, "0"); assert.equal(blocked.expectedColdLiquidRaw, "0");
+    }
+    await assert.rejects(simulateReadyRow({ call: async () => { throw new Error("RPC unavailable"); } }, candidate), /RPC unavailable/);
+  }
+});
+
+test("send-time simulation revert skips v2 and continues to C; actual receipt failure still stops", async () => {
+  const legacy = manifest.rows.find(r => r.bucket === "B" && r.escrow === "v2");
+  const first = classify(legacy, snapshot("B")), last = ready("C");
+  const h = harness([first, last]); const simulated = [];
+  h.io.simulate = async candidate => {
+    simulated.push(candidate.call);
+    return simulateReadyRow({ call: async () => {
+      if (candidate === first) throw Object.assign(new Error("reverted"), { code: "CALL_EXCEPTION", data: "0x82b42900" });
+      return "0x";
+    } }, candidate, "latest");
+  };
+  const result = await executePlan(h.plan, commitArgs(h.plan), h.io);
+  assert.equal(simulated.length, 2); assert.deepEqual(h.sent, [last.call]);
+  assert.equal(result.skipped[0].reason, "simulation_reverted:Unauthorized()"); assert.equal(result.done.length, 1);
+  const failed = harness([first, last]);
+  failed.io.send = async call => { failed.sent.push(call); return { hash: "0xtx", wait: async () => ({ status: 0 }) }; };
+  await assert.rejects(executePlan(failed.plan, commitArgs(failed.plan), failed.io));
+  assert.deepEqual(failed.sent, [first.call]); assert.equal(failed.logs.at(-1).notDone.length, 2);
 });
 
 test("phantom and duplicate rejection logs cannot change the reviewed plan or send-time pre-state", async () => {

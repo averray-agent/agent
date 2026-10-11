@@ -44,6 +44,7 @@ const escrowAbi = [...ESCROW_CORE_ABI.filter((s) => /^(function (jobs|accounts|p
 const accountAbi = [...AGENT_ACCOUNT_ABI.filter((s) => /^function (positions|strategyShares|deallocateIdleFunds)\(/.test(s)),
   "function registry() view returns (address)", "function policy() view returns (address)",
   "function treasuryAccount() view returns (address)",
+  "function escrowOperators(address) view returns (bool)",
   "event StrategyDeallocated(address indexed account,bytes32 indexed strategyId,address indexed asset,uint256 amount)"];
 const policyAbi = ["function paused() view returns (bool)", "function claimFeeVerifierBps() view returns (uint16)"];
 const adapterAbi = ["function totalAssets() view returns (uint256)", "function totalShares() view returns (uint256)",
@@ -117,6 +118,7 @@ export function classify(row, snapshot, signer = ADDRESSES.signer) {
     return result("ready", undefined, amount);
   }
   const state = Number(job.state);
+  if (snapshot.escrowIsAacOperator !== true) return result("blocked", "escrow_not_aac_operator");
   if ((row.bucket === "A" && state === 7) || (["B", "B'"].includes(row.bucket) && state === 6)
       || (row.bucket === "D" && [1, 4, 6, 7].includes(state))) return result("already_done");
   if (snapshot.paused) return result("blocked", "paused");
@@ -155,6 +157,29 @@ export async function assertNonceIdle(provider, signer = ADDRESSES.signer) {
   if (latest !== pending) throw new Error(`signer_nonce_busy latest=${latest} pending=${pending}`);
   return { latest: String(latest), pending: String(pending) };
 }
+const simulationErrors = new Interface(["error Unauthorized()", "error InvalidState()"]);
+export async function simulateReadyRow(provider, row, blockTag = row.observation?.block, signer = ADDRESSES.signer) {
+  if (row.status !== "ready") return row;
+  if (blockTag == null) throw new Error("simulation_block_unavailable");
+  const iface = new Interface(row.row.bucket === "C" ? accountAbi : escrowAbi);
+  const request = { to: row.call.to, from: signer, data: iface.encodeFunctionData(row.call.function, row.call.args), blockTag };
+  try {
+    await provider.call(request);
+    return { ...row, simulation: { ...request, result: "success" } };
+  } catch (error) {
+    const data = error.data ?? error.info?.error?.data;
+    let decoded;
+    try { decoded = simulationErrors.parseError(data); } catch { /* unknown/empty revert data */ }
+    // Transport failures are not contract reverts: fail closed, do not pretend
+    // the row was successfully simulated or that another row is safe to send.
+    if (error.code !== "CALL_EXCEPTION" && !decoded) throw error;
+    const reason = decoded ? `${decoded.name}(${decoded.args.map(arg => typeof arg === "string" ? JSON.stringify(arg) : String(arg)).join(",")})`
+      : error.reason ? `Error(${JSON.stringify(error.reason)})` : `unknown_revert(${typeof data === "string" ? data : "0x"})`;
+    return { ...row, status: "blocked", reason: `simulation_reverted:${reason}`,
+      expectedBankLiquidRaw: "0", expectedBankReservedRaw: "0", expectedColdLiquidRaw: "0",
+      simulation: { ...request, result: "reverted", error: reason } };
+  }
+}
 export function receiptEvidence(receipt, classified) {
   if (Number(receipt.status) !== 1) throw new Error("Transaction reverted");
   const iface = new Interface(classified.row.bucket === "C" ? accountAbi : escrowAbi);
@@ -182,6 +207,12 @@ export async function executePlan(plan, args, io) {
       await io.assertNonceIdle();
       if (io.now() >= deadline) throw new Error("cleanup_stopped_window_budget_exhausted");
       // Fresh C call carries the full send-time position, not the preview amount.
+      const simulated = await io.simulate(fresh);
+      if (simulated.status !== "ready") {
+        skipped.push({ row: fresh.row, status: simulated.status, reason: simulated.reason });
+        io.log({ type: "skipped", ...skipped.at(-1), simulation: simulated.simulation }); continue;
+      }
+      if (io.now() >= deadline) throw new Error("cleanup_stopped_window_budget_exhausted");
       if (fresh.row.jobId) assertAllowedId(fresh.row.jobId);
       if (fresh.row.bucket !== "C") assertAllowedId(fresh.call.args[0]);
       const tx = await io.send(fresh.call);
@@ -277,7 +308,7 @@ export async function createReader(provider, deployments, { readRetirements = as
   const read = async (row) => {
     const head = await provider.getBlock("latest"); if (!head) throw new Error("Latest block unavailable");
     const at = { blockTag: head.number };
-    const observed = result => ({ ...result, observation: { block: head.number, timestamp: head.timestamp } });
+    const observed = result => simulateReadyRow(provider, { ...result, observation: { block: head.number, timestamp: head.timestamp } });
     if (row.bucket === "C") {
       const registryAddress = await aac.registry(at), policyAddress = await aac.policy(at);
       const registry = new Contract(registryAddress, ["function getStrategy(bytes32) view returns ((bytes32 strategyId,address adapter,address asset,string riskLabel,bool active))"], provider);
@@ -293,7 +324,8 @@ export async function createReader(provider, deployments, { readRetirements = as
     const contract = escrow[row.escrow];
     const job = plain((await contract.jobs(row.jobId, at)).toObject());
     const policyAddress = await contract.policy(at);
-    const snapshot = { now: head.timestamp, job, paused: await new Contract(policyAddress, policyAbi, provider).paused(at),
+    const snapshot = { now: head.timestamp, job, escrowIsAacOperator: await aac.escrowOperators(ADDRESSES[row.escrow], at),
+      paused: await new Contract(policyAddress, policyAbi, provider).paused(at),
       bindingsValid: equal(await contract.accounts(at), ADDRESSES.aac) && equal(policyAddress, deployments.contracts.treasuryPolicy) };
     if (row.bucket === "A") { snapshot.createdAt = await contract.createdAt(row.jobId, at); snapshot.minOpenAge = await contract.MIN_OPEN_FOR_CANCEL(at); }
     if (["B", "B'"].includes(row.bucket)) snapshot.disputeWindow = await contract.DISPUTE_WINDOW(at);
@@ -307,7 +339,7 @@ export async function createReader(provider, deployments, { readRetirements = as
     }
     return observed(classify(row, snapshot));
   };
-  return { read, position };
+  return { read, position, simulate: row => simulateReadyRow(provider, row, "latest") };
 }
 export function parseArgs(argv) {
   const args = { commit: false };

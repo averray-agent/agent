@@ -521,6 +521,29 @@ test("dry-run prints the complete plan without reading a signing secret", async 
   assert.match(lines.join("\n"), /plan hash:/u);
 });
 
+test("legacy rescue refuses revoked AAC operator before prepare/finalize scans or signer access", async () => {
+  const account = "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57";
+  const readAbi = new Interface(["function accounts() view returns (address)", "function escrowOperators(address) view returns (bool)"]);
+  for (const phase of ["prepare", "finalize"]) {
+    let snapshots = 0, secrets = 0; const queries = [];
+    await assert.rejects(runRescue(args({ escrow: "legacy", phase }), {
+      loadManifest: async () => ({ path: "/repo/deployments/mainnet.json", manifest: { profile: "mainnet", verifier: SIGNER,
+        contracts: { legacyEscrowCore: ESCROW }, deploymentBlocks: { escrowCore: 18_647_902 } } }),
+      loadTombstone: async () => ({ file: TOMBSTONE_DOCUMENT_PATH, content: "sentinel", hash: TOMBSTONE_HASH }),
+      createRpc: async () => ({ chainId: 420420419, selectedUrl: "https://example.invalid", rpcUrls: ["https://example.invalid"],
+        provider: { destroy: () => {}, call: async tx => {
+          const parsed = readAbi.parseTransaction(tx); queries.push(parsed.name);
+          if (parsed.name === "accounts") { assert.equal(tx.to, ESCROW); return readAbi.encodeFunctionResult("accounts", [account]); }
+          assert.equal(tx.to, account); assert.equal(parsed.args[0], ESCROW);
+          return readAbi.encodeFunctionResult("escrowOperators", [false]);
+        } } }),
+      readSnapshot: async () => { snapshots++; return snapshot(); },
+      loadSecret: () => { secrets++; throw new Error("must not read secret"); }, log: () => {}
+    }), /escrow_not_aac_operator/);
+    assert.deepEqual(queries, ["accounts", "escrowOperators"]); assert.equal(snapshots, 0); assert.equal(secrets, 0);
+  }
+});
+
 test("refusal: changed live plan aborts execute before secret access", async () => {
   let secretReads = 0;
   await assert.rejects(
