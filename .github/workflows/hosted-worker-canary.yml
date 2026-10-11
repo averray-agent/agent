@@ -76,7 +76,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-worker-canary
+  group: production # backend broker uses the same 0x5a6836 signer
   cancel-in-progress: false
 
 jobs:

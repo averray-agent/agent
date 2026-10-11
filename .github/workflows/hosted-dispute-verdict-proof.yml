@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-dispute-verdict-proof-${{ inputs.dispute_id }}
+  group: production # live proof may invoke backend chain settlement
   cancel-in-progress: false
 
 jobs:

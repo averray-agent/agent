@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-signer-liquidity-funding
+  group: production # shared 0x5a6836 signer and deploy/cleanup maintenance
   cancel-in-progress: false
 
 jobs:
