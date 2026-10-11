@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { Contract, FetchRequest, Interface, JsonRpcProvider, encodeBytes32String, getAddress, id } from "ethers";
 import { ESCROW_CORE_ABI, AGENT_ACCOUNT_ABI } from "../../mcp-server/src/blockchain/abis.js";
+import { canonicalReceiptLogs } from "./canonical-receipt-logs.mjs";
 
 export const CHAIN_ID = 420420419;
 export const STRATEGY = "AAC_IDLE_DEPOSIT_POOL_V21";
@@ -83,10 +84,14 @@ export function classify(row, snapshot, signer = ADDRESSES.signer) {
     heldRaw: row.bucket === "C" ? "0" : refundable(job).toString(),
     worker: job?.worker ?? null, slashStakeRaw: String(job?.claimStake ?? 0), slashFeeRaw: String(job?.claimFee ?? 0),
     refundRecipient: job?.poster ?? signer, ...(snapshot.fairness ? { fairness: snapshot.fairness } : {}),
-    preState: snapshot.preState ?? plain(snapshot) };
+    phantomLogsDropped: snapshot.fairness?.phantomLogsDropped ?? 0,
+    preState: plain(snapshot.preState ?? snapshot) };
   // Observation time decides eligibility but is not pre-state: advancing the
   // chain alone must not invalidate every reviewed plan.
   delete base.preState.now;
+  // RPC noise is diagnostic, not chain pre-state. Keep the canonical events and
+  // the entire job tuple hashed, but never the number of phantom copies seen.
+  if (base.preState.fairness) delete base.preState.fairness.phantomLogsDropped;
   const result = (status, reason, amount = 0n) => ({ ...base, status, ...(reason ? { reason } : {}),
     call: { to: ADDRESSES[row.escrow], function: row.function,
       args: row.bucket === "C" ? [signer, STRATEGY_ID, String(amount)] : [row.jobId] },
@@ -227,7 +232,7 @@ export async function readRejectionEvidence(provider, row, job, head, readSessio
           verdictReasonCode: session.verification?.reasonCode ?? null };
   } catch { backend = { status: "unavailable", reason: "backend_session_read_failed" }; }
   // Claim timeouts have no current rejection. Do not invent a verifier verdict.
-  if (!Number(job.rejectedAt)) return { backend, chain: { status: "not_applicable", reason: "no_current_rejection", events: [] } };
+  if (!Number(job.rejectedAt)) return { backend, phantomLogsDropped: 0, chain: { status: "not_applicable", reason: "no_current_rejection", events: [] } };
   try {
     const timestamp = Number(job.rejectedAt);
     // Locate the exact rejectedAt timestamp, not an unbounded deployment-to-head
@@ -247,22 +252,22 @@ export async function readRejectionEvidence(provider, row, job, head, readSessio
     const iface = new Interface(escrowAbi);
     const logs = await provider.getLogs({ address: ADDRESSES[row.escrow], fromBlock, toBlock,
       topics: [[iface.getEvent("Verified").topicHash, iface.getEvent("JobRejected").topicHash], row.jobId] });
+    const canonical = await canonicalReceiptLogs(provider, logs);
     const events = [];
-    for (const log of logs) {
+    for (const log of canonical.events) {
       if (!equal(log.address, ADDRESSES[row.escrow])) continue;
       const parsed = iface.parseLog(log);
       if (!equal(parsed.args.jobId, row.jobId) || (parsed.name === "Verified" && parsed.args.approved)) continue;
-      const block = await provider.getBlock(log.blockNumber);
-      if (!block || Number(block.timestamp) !== timestamp) continue;
+      if (log.timestamp !== timestamp) continue;
       events.push({ event: parsed.name, reasonCode: parsed.args.reasonCode,
         reasoningHash: parsed.args.reasoningHash ?? null, verifier: parsed.args.verifier ?? job.rejectingVerifier,
         verifierSource: parsed.name === "Verified" ? "event" : "job.rejectingVerifier",
-        block: log.blockNumber, blockTime: new Date(Number(block.timestamp) * 1000).toISOString(),
-        transactionHash: log.transactionHash });
+        block: log.blockNumber, blockTime: new Date(log.timestamp * 1000).toISOString(),
+        logIndex: log.logIndex, transactionHash: log.transactionHash });
     }
-    return { backend, chain: { status: events.some(e => e.event === "Verified") && events.some(e => e.event === "JobRejected") ? "available" : "incomplete",
+    return { backend, phantomLogsDropped: canonical.phantomLogsDropped, chain: { status: events.some(e => e.event === "Verified") && events.some(e => e.event === "JobRejected") ? "available" : "incomplete",
       events, note: "Operator must review reason codes/hashes for platform faults before approving any slash; missing evidence is not exoneration." } };
-  } catch (error) { return { backend, chain: { status: "unavailable", reason: error.code ?? error.message, events: [] } }; }
+  } catch (error) { return { backend, phantomLogsDropped: 0, chain: { status: "unavailable", reason: error.code ?? error.message, events: [] } }; }
 }
 export async function createReader(provider, deployments, { readRetirements = async () => [], readSession } = {}) {
   const aac = new Contract(ADDRESSES.aac, accountAbi, provider);
