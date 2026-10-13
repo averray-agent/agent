@@ -180,6 +180,7 @@ export const HTTP_METRIC_PATHS = Object.freeze([
     "/admin/jobs/spec-hash-sweep",
     "/admin/sessions",
     "/admin/ops/overnight-ledger",
+    "/admin/ops/bank-moves",
     "/admin/ops/topup-destinations",
     "/admin/treasury/summary",
     "/admin/jobs/ingest/github",

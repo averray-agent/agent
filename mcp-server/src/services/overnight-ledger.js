@@ -9,6 +9,12 @@ import { loadDeploymentManifest, resolveHealthAddresses } from "../core/health-c
 import { SELF_IDENTITY_KINDS } from "../core/self-identity-registry.js";
 import { settlementOutcome } from "../core/session-settlement.js";
 import { h160ToSs58 } from "../core/wallet-identity.js";
+import {
+  BANK_MOVES_EVENT_READ_LIMIT,
+  bankMoveWallets,
+  buildBankMoves,
+  loadWalletArrivalRecords
+} from "./bank-moves.js";
 
 const USDC_DECIMALS = 6;
 // The signer gas balance is observed through the Hub EVM account, whose native
@@ -174,6 +180,41 @@ export class OvernightLedgerService {
         hasOlder: lifecycle.length > EVENT_PAGE_SIZE || eventResult.gap === true
       }
     };
+  }
+
+  async getBankMoves(since, { limit } = {}) {
+    if (!this.stateStore?.listRecentSessions || !this.stateStore?.listEventLog) {
+      throw new Error("Bank move sources unavailable");
+    }
+    const generatedAt = asIso(this.now());
+    const [sessions, eventResult, snapshotState] = await Promise.all([
+      collectAllSessions(this.stateStore),
+      this.stateStore.listEventLog({ limit: BANK_MOVES_EVENT_READ_LIMIT }),
+      this.stateStore.getServiceState?.(REWARD_BANK_SNAPSHOT_SCOPE) ?? {}
+    ]);
+    const events = Array.isArray(eventResult?.events) ? eventResult.events : [];
+    const addresses = resolveHealthAddresses({ env: this.env });
+    const bankAccounts = [
+      addresses.settlementSigner,
+      ...normalizeSnapshots(snapshotState?.snapshots).map((row) => row.account)
+    ];
+    const wallets = bankMoveWallets({ sessions, events, bankAccounts });
+    const arrivalRecords = await loadWalletArrivalRecords(this.stateStore, wallets);
+    return buildBankMoves({
+      since,
+      limit,
+      generatedAt,
+      sessions,
+      events,
+      bankAccounts,
+      usdcAddresses: [addresses.token],
+      arrivalRecords,
+      selfIdentityRegistry: this.selfIdentityRegistry,
+      historyComplete: sessions.length < READ_LIMIT,
+      sessionReadCap: READ_LIMIT,
+      eventReadCap: BANK_MOVES_EVENT_READ_LIMIT,
+      eventLogBounded: eventResult?.gap === true || events.length >= BANK_MOVES_EVENT_READ_LIMIT
+    });
   }
 
   getTopupDestinations() {
