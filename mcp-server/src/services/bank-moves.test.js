@@ -23,7 +23,13 @@ const TX = {
   timeout: `0x${"d".repeat(64)}`,
   settle: `0x${"e".repeat(64)}`,
   deposit: `0x${"f".repeat(64)}`,
-  stray: `0x${"9".repeat(64)}`
+  stray: `0x${"9".repeat(64)}`,
+  cancel: `0x${"8".repeat(64)}`,
+  disputeRefund: `0x${"7".repeat(64)}`,
+  disputeSettle: `0x${"6".repeat(64)}`,
+  fee: `0x${"5".repeat(64)}`,
+  chain: `0x${"4".repeat(64)}`,
+  finalize: `0x${"3".repeat(64)}`
 };
 
 function hash(label) {
@@ -214,10 +220,12 @@ test("a failed join reports the job as not reported and does not borrow a nearby
   assert.equal(move.work.jobId, NOT_REPORTED);
   assert.equal(move.attribution.job, "not reported");
   assert.equal(move.wallet.tag, "ambiguous");
-  assert.equal(move.wallet.address, OTHER);
+  assert.equal(move.wallet.address, NOT_REPORTED);
+  assert.equal(move.part, NOT_REPORTED);
   assert.equal(move.line.includes("nearby-job"), false);
   assert.equal(move.line.includes("job not reported"), true);
   assert.equal(move.line.includes(BANK), false);
+  assert.equal(move.line.includes(OTHER), false);
   assert.equal(move.arrival.funnelStage, NOT_REPORTED);
   assert.equal(move.line.includes("browsed"), false);
   assert.equal(JSON.stringify(move).includes("203.0.113.8"), false);
@@ -512,6 +520,187 @@ test("since accepts an inclusive timestamp or an exclusive cursor", () => {
   );
 });
 
+test("fee and retention legs keep the worker tag and never introduce the recipient", () => {
+  const treasury = "0x4444444444444444444444444444444444444444";
+  const earlier = approved("job-a", WORKER, "2026-09-28T08:00:00.000Z", "2026-10-01T00:00:00.000Z");
+  const current = claim({ status: "resolved", claimedAt: "2026-10-12T00:00:00.000Z" });
+  current.resolvedAt = MOVE;
+  current.verificationSummary = { outcome: "approved" };
+  current.payoutTx = { status: 1, txHash: hash("fee") };
+  const result = feed({
+    sessions: [earlier, current],
+    events: [
+      accountEvent("worker-leg", "account.reservation_settled", hash("fee"), { recipient: WORKER, amount: "1000000" }),
+      accountEvent("fee-leg", "account.reservation_settled", hash("fee"), { recipient: treasury, amount: "50000" }),
+      accountEvent("retention-leg", "account.reservation_settled", hash("fee"), { recipient: treasury, amount: "20000" }),
+      escrow("escrow.job_closed", hash("fee"), current.jobId, current.sessionId),
+      {
+        id: "retention-applied",
+        topic: "escrow.gas_retention_applied",
+        txHash: hash("fee"),
+        timestamp: MOVE,
+        jobId: current.jobId,
+        data: { retainedRaw: "20000" }
+      }
+    ]
+  });
+  const byId = new Map(result.moves.map((move) => [move.id, move]));
+  assert.equal(byId.get("worker-leg").part, "worker");
+  assert.equal(byId.get("fee-leg").part, "fee");
+  assert.equal(byId.get("retention-leg").part, "retention");
+  for (const move of result.moves) {
+    assert.equal(move.wallet.address, WORKER);
+    assert.equal(move.wallet.tag, "regular");
+    assert.equal(move.line.includes(treasury), false);
+    assert.equal(move.line.includes("first arrival"), false);
+  }
+  assert.match(byId.get("worker-leg").line, /^-1\.00 settled ·/u);
+  assert.match(byId.get("fee-leg").line, /^-0\.05 settled fee ·/u);
+  assert.match(byId.get("retention-leg").line, /^-0\.02 settled retention ·/u);
+});
+
+test("cancel and dispute resolution join refunds, and dispute resolution joins settles", () => {
+  const cancelled = claim({ sessionId: "cancel-session", jobId: "job-cancel", claimedAt: "2026-10-10T00:00:00.000Z" });
+  const disputed = claim({ sessionId: "dispute-session", jobId: "job-dispute", claimedAt: "2026-10-11T00:00:00.000Z" });
+  const result = feed({
+    sessions: [cancelled, disputed],
+    events: [
+      accountEvent("cancel", "account.reservation_released", hash("cancel")),
+      escrow("escrow.job_cancelled", hash("cancel"), cancelled.jobId, cancelled.sessionId),
+      accountEvent("dispute-refund", "account.reservation_released", hash("disputeRefund")),
+      escrow("escrow.dispute_resolved", hash("disputeRefund"), disputed.jobId, disputed.sessionId),
+      accountEvent("dispute-settle", "account.reservation_settled", hash("disputeSettle"), { recipient: WORKER }),
+      escrow("escrow.dispute_resolved", hash("disputeSettle"), disputed.jobId, disputed.sessionId)
+    ]
+  });
+  const byId = new Map(result.moves.map((move) => [move.id, move]));
+  assert.equal(byId.get("cancel").work.jobId, cancelled.jobId);
+  assert.equal(byId.get("cancel").work.status, "refunded");
+  assert.equal(byId.get("cancel").attribution.basis, "escrow.job_cancelled");
+  assert.equal(byId.get("dispute-refund").work.jobId, disputed.jobId);
+  assert.equal(byId.get("dispute-refund").attribution.basis, "escrow.dispute_resolved");
+  assert.equal(byId.get("dispute-refund").work.status, "refunded");
+  assert.equal(byId.get("dispute-settle").work.jobId, disputed.jobId);
+  assert.equal(byId.get("dispute-settle").attribution.basis, "escrow.dispute_resolved");
+  assert.equal(byId.get("dispute-settle").part, "worker");
+  assert.equal(byId.get("dispute-settle").wallet.address, WORKER);
+});
+
+test("JobFunded that carries only the chain job id matches the saved session", () => {
+  const chainJobId = `0x${"ab".repeat(32)}`;
+  const current = claim({ sessionId: "saved-session", jobId: "logical-job" });
+  current.chainJobId = chainJobId;
+  const result = feed({
+    sessions: [current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("chain")),
+      {
+        id: "funded-on-chain",
+        topic: "escrow.job_funded",
+        txHash: hash("chain"),
+        timestamp: MOVE,
+        jobId: chainJobId,
+        data: { chainJobId }
+      }
+    ]
+  });
+  assert.equal(result.moves[0].work.jobId, "logical-job");
+  assert.equal(result.moves[0].work.sessionId, "saved-session");
+  assert.equal(result.moves[0].wallet.address, WORKER);
+  assert.equal(result.moves[0].attribution.basis, "escrow.job_funded");
+});
+
+test("a later JobClosed of an already rejected job stays rejected", () => {
+  const current = claim({
+    sessionId: "rejected-session",
+    jobId: "rejected-job",
+    status: "rejected",
+    claimedAt: "2026-10-01T00:00:00.000Z"
+  });
+  const result = feed({
+    sessions: [current],
+    events: [
+      {
+        id: "rejected-earlier",
+        topic: "escrow.job_rejected",
+        txHash: hash("reject"),
+        timestamp: "2026-10-02T00:00:00.000Z",
+        jobId: current.jobId,
+        sessionId: current.sessionId
+      },
+      accountEvent("finalize", "account.reservation_released", hash("finalize"), {
+        at: "2026-10-13T14:00:00.000Z",
+        amount: "1000000"
+      }),
+      {
+        id: "closed-later",
+        topic: "escrow.job_closed",
+        txHash: hash("finalize"),
+        timestamp: "2026-10-13T14:00:00.000Z",
+        jobId: current.jobId,
+        sessionId: current.sessionId
+      }
+    ]
+  });
+  const move = result.moves.find((row) => row.id === "finalize");
+  assert.equal(move.attribution.basis, "escrow.job_closed");
+  assert.equal(move.work.status, "rejected");
+  assert.match(move.line, /job rejected-job \(git-patch-tests-v1\) rejected/u);
+});
+
+test("a quiet tick parks the cursor and the next tick returns only the new move", () => {
+  const current = claim({ sessionId: "old-session", jobId: "job-old", claimedAt: "2026-10-12T00:00:00.000Z" });
+  const parked = feed({
+    sessions: [current],
+    events: [
+      accountEvent("old", "account.reserved", hash("reserve"), { at: "2026-10-12T00:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ],
+    extra: { since: "old" }
+  });
+  assert.deepEqual(parked.moves, []);
+  assert.equal(parked.nextCursor, "old");
+  assert.equal(parked.gap, false);
+
+  const next = claim({ sessionId: "new-session", jobId: "job-new", claimedAt: "2026-10-13T12:00:00.000Z" });
+  const tick = feed({
+    sessions: [current, next],
+    events: [
+      accountEvent("old", "account.reserved", hash("reserve"), { at: "2026-10-12T00:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId),
+      accountEvent("new", "account.reserved", hash("stray"), { at: "2026-10-13T12:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("stray"), next.jobId, next.sessionId)
+    ],
+    extra: { since: parked.nextCursor }
+  });
+  assert.deepEqual(tick.moves.map((move) => move.id), ["new"]);
+  assert.equal(tick.gap, false);
+  assert.equal(tick.nextCursor, "new");
+
+  const quietIso = feed({
+    sessions: [current],
+    events: [
+      accountEvent("old", "account.reserved", hash("reserve"), { at: "2026-10-12T00:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ],
+    extra: { since: "2026-10-13T00:00:00.000Z" }
+  });
+  assert.deepEqual(quietIso.moves, []);
+  assert.equal(quietIso.nextCursor, null);
+  const afterQuiet = feed({
+    sessions: [current, next],
+    events: [
+      accountEvent("old", "account.reserved", hash("reserve"), { at: "2026-10-12T00:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId),
+      accountEvent("new", "account.reserved", hash("stray"), { at: "2026-10-13T12:00:00.000Z" }),
+      escrow("escrow.job_funded", hash("stray"), next.jobId, next.sessionId)
+    ],
+    extra: { since: "2026-10-13T00:00:00.000Z" }
+  });
+  assert.deepEqual(afterQuiet.moves.map((move) => move.id), ["new"]);
+  assert.equal(afterQuiet.gap, false);
+});
+
 test("the response schema is stable for the monitor", () => {
   const current = claim();
   const result = feed({
@@ -547,6 +736,7 @@ test("the response schema is stable for the monitor", () => {
     "kind",
     "line",
     "next",
+    "part",
     "txHash",
     "wallet",
     "work"

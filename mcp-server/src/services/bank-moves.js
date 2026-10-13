@@ -25,12 +25,15 @@ const MOVE_TOPICS = Object.freeze({
 const FUND_TOPIC = "escrow.job_funded";
 const RELEASE_TOPICS = Object.freeze([
   "escrow.job_rejected",
+  "escrow.job_cancelled",
   "escrow.auto_resolved_on_timeout",
+  "escrow.dispute_resolved",
   "escrow.job_closed"
 ]);
 const SETTLE_TOPICS = Object.freeze([
-  "escrow.job_closed",
-  "escrow.auto_resolved_on_timeout"
+  "escrow.auto_resolved_on_timeout",
+  "escrow.dispute_resolved",
+  "escrow.job_closed"
 ]);
 const JOIN_TOPICS = Object.freeze({
   reserve: [FUND_TOPIC],
@@ -70,6 +73,12 @@ const VERBS = Object.freeze({
  * Job ids come only from an escrow event in the same transaction. Wallet tags
  * use sessions strictly before that move. Nothing here is inferred from amount
  * or time, and pre-auth telemetry is never attached to a wallet.
+ *
+ * One settlement transaction can emit several ReservationSettled logs. The
+ * tagged wallet is always the joined session's worker. A leg whose recipient
+ * is that worker stays `settled`. Any other recipient is `settled fee`, or
+ * `settled retention` when exactly one such leg matches a same-transaction
+ * GasRetentionApplied amount. Fee and retention recipients are never tagged.
  */
 export function buildBankMoves({
   since,
@@ -251,7 +260,8 @@ function attributeMove({
     moveMs
   });
   const amount = amountOf(event, usdc, kind);
-  const work = workOf(kind, join);
+  const part = settlementPart(kind, event, join, txEvents);
+  const work = workOf(kind, join, events, at);
   const githubAuthor = githubAuthorOf(join.session);
   const arrival = {
     door: kind === "deposit" ? NOT_REPORTED : doorOf(join.session, arrivalRecord),
@@ -271,8 +281,9 @@ function attributeMove({
     at,
     txHash: normalizeHash(event.txHash) ?? NOT_REPORTED,
     kind,
+    part,
     amount,
-    line: lineFor({ amount, kind, work, wallet: walletView, arrival, next, at }),
+    line: lineFor({ amount, kind, part, work, wallet: walletView, arrival, next, at }),
     work: publicWork(work),
     wallet: walletView,
     arrival,
@@ -313,9 +324,10 @@ function eventJobKey(event) {
 }
 
 function eventMatchesSession(session, key) {
-  if (key.sessionId) return session?.sessionId === key.sessionId;
-  if (key.jobId && sameId(session?.jobId, key.jobId)) return true;
-  if (key.jobId && sameId(session?.chainJobId, key.jobId)) return true;
+  // A derived session id from before the claim row exists must not hide the
+  // chain job id ensureJob already emitted.
+  if (key.sessionId && session?.sessionId === key.sessionId) return true;
+  if (key.jobId && (sameId(session?.jobId, key.jobId) || sameId(session?.chainJobId, key.jobId))) return true;
   if (key.chainJobId && (sameId(session?.chainJobId, key.chainJobId) || sameId(session?.jobId, key.chainJobId))) {
     return true;
   }
@@ -329,8 +341,32 @@ function basisFor(kind, matches) {
 
 function workerWallet(kind, event, join) {
   if (kind === "deposit") return normalizeAddress(event.wallet);
-  if (kind === "settle") return normalizeAddress(event?.data?.recipient);
   return normalizeAddress(join.session?.wallet);
+}
+
+function settlementPart(kind, event, join, txEvents) {
+  if (kind !== "settle") return NOT_REPORTED;
+  const worker = normalizeAddress(join.session?.wallet);
+  const recipient = normalizeAddress(event?.data?.recipient);
+  if (!worker || !recipient) return NOT_REPORTED;
+  if (recipient === worker) return "worker";
+  return uniqueRetentionLeg(event, txEvents, worker) ? "retention" : "fee";
+}
+
+function uniqueRetentionLeg(event, txEvents, worker) {
+  const amount = rawAmount(event);
+  if (!amount) return false;
+  const retentionAmounts = txEvents
+    .filter((row) => row.topic === "escrow.gas_retention_applied")
+    .map((row) => String(row?.data?.retainedRaw ?? row?.data?.amount ?? ""))
+    .filter((value) => value === amount);
+  if (retentionAmounts.length !== 1) return false;
+  const matches = txEvents.filter((row) => (
+    row.topic === "account.reservation_settled"
+    && rawAmount(row) === amount
+    && normalizeAddress(row?.data?.recipient) !== worker
+  ));
+  return matches.length === 1 && matches[0] === event;
 }
 
 function earlierSessions(sessions, wallet, moveMs, currentSessionId) {
@@ -407,7 +443,7 @@ function countHistory(sessions) {
   };
 }
 
-function workOf(kind, join) {
+function workOf(kind, join, events, at) {
   if (kind === "deposit") return blankWork("deposit");
   if (!join.joined) return blankWork("missing");
   const job = jobDefinition(join.session);
@@ -427,7 +463,7 @@ function workOf(kind, join) {
     ...reference,
     rewardAmount: rewardAmountOf(job),
     rewardAsset: text(job?.rewardAsset) || NOT_REPORTED,
-    status: moveStatus(kind, join),
+    status: moveStatus(kind, join, events, at),
     job,
     lineKind: "job"
   };
@@ -465,16 +501,38 @@ function publicWork(work) {
   };
 }
 
-function moveStatus(kind, join) {
+function moveStatus(kind, join, events, at) {
   if (kind === "reserve") return "claimed";
   if (kind === "settle") return "settled";
-  if (kind === "refund") return join.basis === "escrow.job_rejected" ? "rejected" : "refunded";
+  if (kind === "refund") {
+    if (join.basis === "escrow.job_rejected" || laterCloseOfRejection(join, events, at)) return "rejected";
+    return "refunded";
+  }
   return NOT_REPORTED;
 }
 
-function amountOf(event, usdc, kind) {
+function laterCloseOfRejection(join, events, at) {
+  if (join.basis !== "escrow.job_closed") return false;
+  const ids = [join.session?.jobId, join.session?.chainJobId, join.jobId].filter(Boolean);
+  const moveMs = Date.parse(at ?? "");
+  if (!Number.isFinite(moveMs) || ids.length === 0) return false;
+  return events.some((event) => {
+    if (event?.topic !== "escrow.job_rejected") return false;
+    const key = eventJobKey(event);
+    const sameJob = ids.some((id) => sameId(key.jobId, id) || sameId(key.chainJobId, id));
+    const rejectedMs = Date.parse(event?.timestamp ?? "");
+    return sameJob && Number.isFinite(rejectedMs) && rejectedMs < moveMs;
+  });
+}
+
+function rawAmount(event) {
   const raw = event?.data?.amountRaw ?? event?.data?.amount;
-  const known = /^(0|[1-9][0-9]*)$/u.test(String(raw ?? ""));
+  return /^(0|[1-9][0-9]*)$/u.test(String(raw ?? "")) ? String(raw) : undefined;
+}
+
+function amountOf(event, usdc, kind) {
+  const raw = rawAmount(event);
+  const known = raw !== undefined;
   const asset = assetOf(event, usdc);
   const direction = kind === "settle" || kind === "refund" ? "out" : "in";
   return {
@@ -547,12 +605,12 @@ function nextOf(kind, session, job) {
   };
 }
 
-function lineFor({ amount, kind, work, wallet, arrival, next, at }) {
+function lineFor({ amount, kind, part, work, wallet, arrival, next, at }) {
   const signed = amount.display === NOT_REPORTED
     ? NOT_REPORTED
     : `${amount.direction === "out" ? "-" : "+"}${amount.display}`;
   return [
-    `${signed} ${VERBS[kind]}`,
+    `${signed} ${verbFor(kind, part)}`,
     workLine(work),
     walletLine(wallet, at),
     `${arrival.door}, client "${lineToken(arrival.clientSoftware)}", stage ${arrival.funnelStage}`,
@@ -560,11 +618,18 @@ function lineFor({ amount, kind, work, wallet, arrival, next, at }) {
   ].join(" · ");
 }
 
+function verbFor(kind, part) {
+  if (kind === "settle" && part === "fee") return "settled fee";
+  if (kind === "settle" && part === "retention") return "settled retention";
+  return VERBS[kind];
+}
+
 function workLine(work) {
   if (work.lineKind === "deposit") return "no job";
   if (work.lineKind === "missing" || work.jobId === NOT_REPORTED) return "job not reported";
   const id = lineToken(work.jobId);
-  return work.profile !== NOT_REPORTED ? `job ${id} (${lineToken(work.profile)})` : `job ${id}`;
+  const jobText = work.profile !== NOT_REPORTED ? `job ${id} (${lineToken(work.profile)})` : `job ${id}`;
+  return work.status === "rejected" ? `${jobText} rejected` : jobText;
 }
 
 function walletLine(wallet, at) {
@@ -620,7 +685,7 @@ function responseShell({
     returnedCount: moves.length,
     limit,
     hasMore,
-    nextCursor: moves.at(-1)?.id ?? NOT_REPORTED,
+    nextCursor: moves.length > 0 ? moves.at(-1).id : (since.kind === "cursor" ? since.value : null),
     gap
   };
 }
