@@ -59,6 +59,7 @@ const AWAITING_STATUSES = new Set(["claimed", "submitted"]);
 const PAYOUT_ON_APPROVAL = new Set(["benchmark", "deterministic", "witness", "human_fallback"]);
 const MONTHS = Object.freeze(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
 const WALLET_RE = /^0x[a-f0-9]{40}$/u;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ARRIVAL_WALLET_RECORD_PREFIX = "arrival-session-record:wallet:";
 
 const VERBS = Object.freeze({
@@ -80,10 +81,14 @@ const VERBS = Object.freeze({
  * `settled retention` when exactly one such leg matches a same-transaction
  * GasRetentionApplied amount. Fee and retention recipients are never tagged.
  *
- * A reserve, refund, or settle attaches a session only when that claim started
- * at or before the move and the escrow event's sessionId and job.worker do not
- * disagree with it. Zero or several survivors are "job not reported"; the
- * worker is not reported and a neighbour's wallet is never used.
+ * A refund or settle attaches a session only when that claim started at or
+ * before the move and the escrow event does not name a different session or
+ * worker. The listener's session id is `<chainJobId>:<worker>`, while the
+ * stored session id is `<logicalJobId>:<wallet>`; either form agrees.
+ * A reserve is the ensureJob fund transaction, which mines before
+ * finalizeClaim stamps claimedAt, so its claim is the later JobClaimed for
+ * that chain job and worker. Several claimants leave the reserve unreported.
+ * Zero or several survivors are "job not reported".
  */
 export function buildBankMoves({
   since,
@@ -250,7 +255,7 @@ function attributeMove({
   registry,
   historyComplete
 }) {
-  const join = joinMove(kind, txEvents, sessions, Date.parse(at));
+  const join = joinMove(kind, txEvents, sessions, Date.parse(at), events);
   const wallet = workerWallet(kind, event, join);
   const moveMs = Date.parse(at);
   const earlier = wallet ? earlierSessions(sessions, wallet, moveMs, join.session?.sessionId) : [];
@@ -308,7 +313,7 @@ function attributeMove({
   };
 }
 
-function joinMove(kind, txEvents, sessions, moveMs) {
+function joinMove(kind, txEvents, sessions, moveMs, allEvents) {
   if (kind === "deposit") return { joined: true, session: undefined, basis: "deposit" };
   const topics = new Set(JOIN_TOPICS[kind] ?? []);
   const matches = txEvents.filter((event) => topics.has(event.topic));
@@ -317,8 +322,8 @@ function joinMove(kind, txEvents, sessions, moveMs) {
     return { joined: false, session: undefined, basis: NOT_REPORTED };
   }
   const candidates = sessions.filter((session) => (
-    claimStartedAtOrBefore(session, moveMs)
-    && keys.every((key) => sessionAgrees(session, key))
+    keys.every((key) => sessionAgrees(session, key))
+    && claimApplies(kind, session, moveMs, keys, allEvents)
   ));
   if (candidates.length !== 1) {
     return { joined: false, session: undefined, basis: NOT_REPORTED };
@@ -345,8 +350,38 @@ function claimStartedAtOrBefore(session, moveMs) {
   return Number.isFinite(claimedAt) && claimedAt <= moveMs;
 }
 
+function claimApplies(kind, session, moveMs, keys, allEvents) {
+  if (claimStartedAtOrBefore(session, moveMs)) return true;
+  // ensureJob mines the fund transaction before claimJob, and finalizeClaim
+  // stamps claimedAt only after that second transaction. A clock window would
+  // have to cover an arbitrary gap, so a reserve instead follows the single
+  // later JobClaimed for this chain job. Refunds and settles stay strict.
+  if (kind !== "reserve") return false;
+  const workers = distinctClaimWorkers(keys, allEvents);
+  return workers.length === 1 && workers[0] === normalizeAddress(session?.wallet);
+}
+
+function distinctClaimWorkers(keys, allEvents) {
+  const ids = new Set(keys.flatMap((key) => [key.jobId, key.chainJobId].filter(Boolean).map((value) => value.toLowerCase())));
+  const workers = new Set();
+  for (const event of allEvents ?? []) {
+    if (event?.topic !== "escrow.job_claimed") continue;
+    const key = eventJobKey(event);
+    const eventIds = [key.jobId, key.chainJobId].filter(Boolean).map((value) => value.toLowerCase());
+    if (!eventIds.some((id) => ids.has(id))) continue;
+    const worker = key.worker || normalizeAddress(event?.wallet) || workerFromSessionId(event?.sessionId);
+    if (worker) workers.add(worker);
+  }
+  return [...workers];
+}
+
+function workerFromSessionId(sessionId) {
+  const wallet = String(sessionId ?? "").split(":")[1];
+  return normalizeAddress(wallet);
+}
+
 function sessionAgrees(session, key) {
-  if (key.sessionId && session?.sessionId !== key.sessionId) return false;
+  if (!sessionIdAgrees(session, key.sessionId)) return false;
   const wallet = normalizeAddress(session?.wallet);
   if (key.worker && wallet !== key.worker) return false;
   const jobMatches = Boolean(
@@ -355,6 +390,16 @@ function sessionAgrees(session, key) {
   );
   if ((key.jobId || key.chainJobId) && !jobMatches) return false;
   return Boolean(key.sessionId || key.jobId || key.chainJobId);
+}
+
+function sessionIdAgrees(session, eventSessionId) {
+  if (!eventSessionId) return true;
+  const presented = eventSessionId.trim().toLowerCase();
+  const stored = String(session?.sessionId ?? "").trim().toLowerCase();
+  if (stored && presented === stored) return true;
+  const chainJobId = String(session?.chainJobId ?? "").trim().toLowerCase();
+  const wallet = normalizeAddress(session?.wallet);
+  return Boolean(chainJobId && wallet && presented === `${chainJobId}:${wallet}`);
 }
 
 function basisFor(kind, matches) {
@@ -841,7 +886,8 @@ function addressSet(values) {
 
 function normalizeAddress(value) {
   const wallet = String(value ?? "").trim().toLowerCase();
-  return WALLET_RE.test(wallet) ? wallet : undefined;
+  if (!WALLET_RE.test(wallet) || wallet === ZERO_ADDRESS) return undefined;
+  return wallet;
 }
 
 function normalizeHash(value) {

@@ -649,28 +649,134 @@ test("a later JobClosed of an already rejected job stays rejected", () => {
   assert.match(move.line, /job rejected-job \(git-patch-tests-v1\) rejected/u);
 });
 
+const CHAIN_JOB = `0x${"11".repeat(32)}`;
+const CLAIMANT = "0xAbCd000000000000000000000000000000000001";
+const CLAIMANT_LOWER = CLAIMANT.toLowerCase();
+
+function listenerEscrow({
+  topic,
+  txHash,
+  at,
+  chainJobId = CHAIN_JOB,
+  logicalJobId = "wiki-123",
+  worker = CLAIMANT,
+  foundSession = true
+}) {
+  return {
+    id: `${topic}:${txHash}`,
+    topic,
+    txHash,
+    timestamp: at,
+    jobId: foundSession ? logicalJobId : chainJobId,
+    sessionId: `${chainJobId}:${worker}`,
+    wallet: worker,
+    data: {
+      chainJobId,
+      job: { worker }
+    }
+  };
+}
+
+function listenerSession({
+  logicalJobId = "wiki-123",
+  chainJobId = CHAIN_JOB,
+  wallet = CLAIMANT_LOWER,
+  claimedAt = "2026-10-13T10:00:06.000Z",
+  sessionId = `${logicalJobId}:${wallet}`
+} = {}) {
+  return {
+    ...claim({
+      sessionId,
+      jobId: logicalJobId,
+      wallet,
+      claimedAt,
+      definition: job({ verifierMode: "benchmark", verification: undefined, source: undefined })
+    }),
+    chainJobId
+  };
+}
+
+test("listener-shaped events attribute one claimant's reserve, refund, and settle", () => {
+  const session = listenerSession();
+  const fund = `0x${"21".repeat(32)}`;
+  const claimTx = `0x${"22".repeat(32)}`;
+  const rejectTx = `0x${"23".repeat(32)}`;
+  const settleTx = `0x${"24".repeat(32)}`;
+  for (const foundSession of [false, true]) {
+    const result = feed({
+      sessions: [session],
+      events: [
+        accountEvent("reserve", "account.reserved", fund, { at: "2026-10-13T10:00:00.000Z" }),
+        {
+          ...listenerEscrow({
+            topic: "escrow.job_funded",
+            txHash: fund,
+            at: "2026-10-13T10:00:00.000Z",
+            worker: "0x0000000000000000000000000000000000000000",
+            foundSession: false
+          }),
+          sessionId: undefined
+        },
+        listenerEscrow({
+          topic: "escrow.job_claimed",
+          txHash: claimTx,
+          at: "2026-10-13T10:00:05.000Z",
+          foundSession
+        }),
+        accountEvent("refund", "account.reservation_released", rejectTx, { at: "2026-10-13T11:00:00.000Z" }),
+        listenerEscrow({
+          topic: "escrow.job_rejected",
+          txHash: rejectTx,
+          at: "2026-10-13T11:00:00.000Z",
+          foundSession
+        }),
+        accountEvent("settle", "account.reservation_settled", settleTx, {
+          at: "2026-10-13T12:00:00.000Z",
+          recipient: CLAIMANT
+        }),
+        listenerEscrow({
+          topic: "escrow.job_closed",
+          txHash: settleTx,
+          at: "2026-10-13T12:00:00.000Z",
+          foundSession
+        })
+      ],
+      extra: { since: "2026-10-01T00:00:00.000Z" }
+    });
+    assert.deepEqual(result.moves.map((move) => move.kind), ["reserve", "refund", "settle"]);
+    for (const move of result.moves) {
+      assert.equal(move.work.jobId, "wiki-123", foundSession ? "session already indexed" : "chain id only");
+      assert.equal(move.wallet.address, CLAIMANT_LOWER);
+      assert.equal(move.wallet.tag, "first arrival");
+      assert.match(move.line, /0xabcd…01 first arrival/u);
+    }
+    assert.match(result.moves[0].line, /^\+1\.00 USDC reserved · job wiki-123 \(benchmark\) ·/u);
+    assert.match(result.moves[1].line, /^-1\.00 USDC refunded · job wiki-123 \(benchmark\) rejected ·/u);
+    assert.match(result.moves[2].line, /^-1\.00 USDC settled · job wiki-123 \(benchmark\) ·/u);
+  }
+});
+
 test("a reopened job does not give the refund to a later claimant", () => {
   const later = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
-  const earlier = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
-  const session = claim({
-    sessionId: "J:B",
-    jobId: "J",
-    wallet: later,
-    claimedAt: "2026-10-13T12:00:00.000Z"
-  });
+  const earlier = "0xAaAa000000000000000000000000000000000001";
+  const session = {
+    ...listenerSession({
+      wallet: later,
+      claimedAt: "2026-10-13T12:00:00.000Z",
+      sessionId: `wiki-123:${later}`
+    })
+  };
   const result = feed({
     sessions: [session],
     events: [
       accountEvent("refund", "account.reservation_released", hash("reject"), { at: "2026-10-13T10:00:00.000Z" }),
-      {
-        id: "rejected-a",
+      listenerEscrow({
         topic: "escrow.job_rejected",
         txHash: hash("reject"),
-        timestamp: "2026-10-13T10:00:00.000Z",
-        jobId: "J",
-        sessionId: "J:A",
-        data: { job: { worker: earlier } }
-      }
+        at: "2026-10-13T10:00:00.000Z",
+        worker: earlier,
+        foundSession: true
+      })
     ],
     extra: { since: "2026-10-01T00:00:00.000Z" }
   });
@@ -682,6 +788,62 @@ test("a reopened job does not give the refund to a later claimant", () => {
   assert.equal(move.line.includes("0xaaaa"), false);
   assert.equal(move.line.includes("0xbbbb"), false);
   assert.equal(move.line.includes("first arrival"), false);
+});
+
+test("listener-shaped claims on a reopened job leave the reserve unreported", () => {
+  const alpha = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
+  const beta = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const fund = `0x${"31".repeat(32)}`;
+  const firstClaim = `0x${"32".repeat(32)}`;
+  const secondClaim = `0x${"33".repeat(32)}`;
+  const first = listenerSession({
+    wallet: alpha,
+    claimedAt: "2026-10-13T10:00:06.000Z",
+    sessionId: `wiki-123:${alpha}`
+  });
+  const second = listenerSession({
+    wallet: beta,
+    claimedAt: "2026-10-13T12:00:06.000Z",
+    sessionId: `wiki-123:${beta}`
+  });
+  const result = feed({
+    sessions: [second, first],
+    events: [
+      accountEvent("reserve", "account.reserved", fund, { at: "2026-10-13T10:00:00.000Z" }),
+      {
+        ...listenerEscrow({
+          topic: "escrow.job_funded",
+          txHash: fund,
+          at: "2026-10-13T10:00:00.000Z",
+          worker: "0x0000000000000000000000000000000000000000",
+          foundSession: false
+        }),
+        sessionId: undefined
+      },
+      listenerEscrow({
+        topic: "escrow.job_claimed",
+        txHash: firstClaim,
+        at: "2026-10-13T10:00:05.000Z",
+        worker: "0xAaAa000000000000000000000000000000000001",
+        foundSession: true
+      }),
+      listenerEscrow({
+        topic: "escrow.job_claimed",
+        txHash: secondClaim,
+        at: "2026-10-13T12:00:05.000Z",
+        worker: "0xBbBb000000000000000000000000000000000002",
+        foundSession: true
+      })
+    ],
+    extra: { since: "2026-10-01T00:00:00.000Z" }
+  });
+  const move = result.moves[0];
+  assert.equal(move.work.jobId, NOT_REPORTED);
+  assert.equal(move.wallet.address, NOT_REPORTED);
+  assert.equal(move.wallet.tag, "ambiguous");
+  assert.equal(move.line.includes("job not reported"), true);
+  assert.equal(move.line.includes("0xaaaa"), false);
+  assert.equal(move.line.includes("0xbbbb"), false);
 });
 
 test("two claimants already on a reopened job are not collapsed to the first session", () => {
@@ -801,6 +963,93 @@ test("an equal timestamp is not history before the move", () => {
   assert.equal(counted.moves[0].wallet.tag, "returning");
   assert.equal(counted.moves[0].wallet.counts.settled, 0);
   assert.equal(counted.moves[0].wallet.counts.jobs, 1);
+
+  const rejectedOnTheDot = {
+    sessionId: "job-reject-equal",
+    jobId: "job-reject-equal",
+    wallet: WORKER,
+    status: "rejected",
+    claimedAt: "2026-10-13T08:00:00.000Z",
+    rejectedAt: MOVE,
+    verificationSummary: { outcome: "rejected" }
+  };
+  const rejected = feed({
+    sessions: [rejectedOnTheDot, current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("reserve")),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ]
+  });
+  assert.equal(rejected.moves[0].wallet.counts.rejected, 0);
+  assert.equal(rejected.moves[0].wallet.tag, "returning");
+});
+
+test("each attribution guard excludes on its own", () => {
+  const wallet = CLAIMANT_LOWER;
+  const other = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const otherChain = `0x${"cd".repeat(32)}`;
+  const base = listenerSession({ claimedAt: "2026-10-13T09:00:00.000Z" });
+  const refundAt = "2026-10-13T10:00:00.000Z";
+  const cases = [
+    {
+      name: "claim started after the move",
+      session: listenerSession({ claimedAt: "2026-10-13T10:00:01.000Z" }),
+      escrow: listenerEscrow({
+        topic: "escrow.job_rejected",
+        txHash: hash("reject"),
+        at: refundAt,
+        worker: CLAIMANT,
+        foundSession: true
+      })
+    },
+    {
+      name: "session id names a different claim",
+      session: base,
+      escrow: {
+        ...listenerEscrow({
+          topic: "escrow.job_rejected",
+          txHash: hash("reject"),
+          at: refundAt,
+          worker: CLAIMANT,
+          foundSession: true
+        }),
+        sessionId: `${otherChain}:${CLAIMANT}`
+      }
+    },
+    {
+      name: "worker disagrees",
+      session: base,
+      escrow: {
+        ...listenerEscrow({
+          topic: "escrow.job_rejected",
+          txHash: hash("reject"),
+          at: refundAt,
+          worker: CLAIMANT,
+          foundSession: true
+        }),
+        sessionId: base.sessionId,
+        data: {
+          chainJobId: CHAIN_JOB,
+          job: { worker: other }
+        }
+      }
+    }
+  ];
+  for (const entry of cases) {
+    const result = feed({
+      sessions: [entry.session],
+      events: [
+        accountEvent("refund", "account.reservation_released", hash("reject"), { at: refundAt }),
+        entry.escrow
+      ],
+      extra: { since: "2026-10-01T00:00:00.000Z" }
+    });
+    const move = result.moves[0];
+    assert.equal(move.wallet.address, NOT_REPORTED, entry.name);
+    assert.equal(move.work.jobId, NOT_REPORTED, entry.name);
+    assert.equal(move.line.includes(wallet), false, entry.name);
+    assert.equal(move.line.includes("0xabcd"), false, entry.name);
+  }
 });
 
 test("client software cannot carry markup into the line", () => {
