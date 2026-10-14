@@ -2260,6 +2260,8 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
     }
   };
 
+  service.jobExecutionService.repoClaimCapWouldRefuse = 4;
+  service.jobExecutionService.repoClaimCapHydrated = true;
   const status = await service.getAdminStatus({
     auth: {
       wallet: WALLET,
@@ -2281,6 +2283,14 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.equal(status.jobLifecycle.paused, 1);
   assert.equal(status.jobLifecycle.claimable, 0);
   assert.equal(status.jobStaleSweeper.enabled, false);
+  assert.equal(status.ops.maintainerRepoClaimCap.wouldRefuse, 4);
+  assert.equal(status.ops.maintainerRepoClaimCap.ambiguous, 0);
+  assert.equal(status.ops.maintainerRepoClaimCap.mode, service.jobExecutionService.repoClaimCap.mode);
+  assert.deepEqual(status.ops.maintainerRepoClaimCap.caps, {
+    noMerge: service.jobExecutionService.repoClaimCap.capNoMerge,
+    merged: service.jobExecutionService.repoClaimCap.capMerged,
+    optedIn: service.jobExecutionService.repoClaimCap.capOptedIn
+  });
 });
 
 test("getAdminStatus exposes durable per-wallet SIWE conversion telemetry", async () => {
