@@ -51,17 +51,21 @@ INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
 # Sync liveness runs on EVERY smoke, not only when the indexer was redeployed
-# (CHECK_INDEXER gates the deploy checks: root + /ready). A wedged Ponder sync
-# keeps /health 200 (process liveness) while /status stops advancing; since
-# #1358 the /credit door needs a current index, so the 2026-09-10 wedge failed
-# every backend-only deploy for ~10h at "CreditPool door did not return the
-# wallet's L1/L2/L3 debt fields" instead of naming the indexer. The budget
-# mirrors the backend's INDEXER_LAG_BUDGET_SECONDS so this smoke and
-# capabilityHealth.indexer agree on what "current" means;
+# (CHECK_INDEXER gates the deploy checks: root + /ready + the /graphql bearer).
+# A wedged Ponder sync keeps /health 200 (process liveness) while /status stops
+# advancing; since #1358 the /credit door needs a current index, so the
+# 2026-09-10 wedge failed every backend-only deploy for ~10h at "CreditPool
+# door did not return the wallet's L1/L2/L3 debt fields" instead of naming the
+# indexer. The budget mirrors the backend's INDEXER_LAG_BUDGET_SECONDS so this
+# smoke and capabilityHealth.indexer agree on what "current" means;
 # INDEXER_MAX_STALENESS_SEC stays honoured as the operator override
 # (docs/INCIDENT_RESPONSE.md uses it to force a deliberate failure).
 INDEXER_LAG_BUDGET_SECONDS=${INDEXER_LAG_BUDGET_SECONDS:-600}
 INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-$INDEXER_LAG_BUDGET_SECONDS}
+INDEXER_GRAPHQL_URL=${INDEXER_GRAPHQL_URL:-https://index.averray.com/graphql}
+APP_INDEXER_GRAPHQL_URL=${APP_INDEXER_GRAPHQL_URL:-https://app.averray.com/index/graphql}
+# Optional: when set, also prove the bearer-authenticated /graphql answers 200.
+INDEXER_GRAPHQL_BEARER_TOKEN=${INDEXER_GRAPHQL_BEARER_TOKEN:-}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
 CHECK_INDEXER_SYNC=${CHECK_INDEXER_SYNC:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
@@ -1146,8 +1150,8 @@ if enabled "$CHECK_METRICS_AUTH"; then
   fi
 fi
 
-# Deploy checks for a redeployed indexer (root + /ready). Sync liveness is
-# checked unconditionally above.
+# Deploy checks for a redeployed indexer (root + /ready + the /graphql bearer).
+# Sync liveness is checked unconditionally above.
 if enabled "$CHECK_INDEXER"; then
   echo "Checking indexer root"
   indexer_json="$(fetch "$INDEXER_URL")"
@@ -1158,6 +1162,42 @@ if enabled "$CHECK_INDEXER"; then
 
   echo "Checking indexer readiness"
   fetch "$INDEXER_READY_URL" >/dev/null
+
+  # /graphql is the indexer's only unbounded query surface. Caddy proxies the
+  # whole Ponder app on index.averray.com and again under app.averray.com/index/,
+  # so both doors must refuse an unauthenticated query. The index host must
+  # answer with the indexer's own 401 body (proving the process gate, not a
+  # perimeter layer); the app-side proxy only has to be not-200, because a
+  # basic-auth shell may answer 401 there before the request reaches Ponder.
+  echo "Checking indexer /graphql bearer gate"
+  graphql_query='{"query":"{ __typename }"}'
+  graphql_probe="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -w $'\n%{http_code}' \
+    -X POST -H 'content-type: application/json' --data "$graphql_query" \
+    "$INDEXER_GRAPHQL_URL")"
+  graphql_status="${graphql_probe##*$'\n'}"
+  graphql_body="${graphql_probe%$'\n'*}"
+  if [[ "$graphql_status" != "401" ]] \
+    || ! jq -e '.error == "unauthorized"' >/dev/null 2>&1 <<<"$graphql_body"; then
+    echo "Expected unauthenticated POST /graphql on the indexer host to return the indexer's 401 {\"error\":\"unauthorized\"}, got HTTP $graphql_status." >&2
+    exit 1
+  fi
+  app_graphql_status="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w '%{http_code}' \
+    -X POST -H 'content-type: application/json' --data "$graphql_query" \
+    "$APP_INDEXER_GRAPHQL_URL")"
+  if [[ "$app_graphql_status" == "200" ]]; then
+    echo "Unauthenticated POST /index/graphql on the operator app returned 200; the /index/ proxy must not expose /graphql." >&2
+    exit 1
+  fi
+  if [[ -n "$INDEXER_GRAPHQL_BEARER_TOKEN" ]]; then
+    graphql_status_with_bearer="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w '%{http_code}' \
+      -X POST -H 'content-type: application/json' --data "$graphql_query" \
+      -H "authorization: Bearer $INDEXER_GRAPHQL_BEARER_TOKEN" \
+      "$INDEXER_GRAPHQL_URL")"
+    if [[ "$graphql_status_with_bearer" != "200" ]]; then
+      echo "Expected bearer-authenticated POST /graphql to return 200, got HTTP $graphql_status_with_bearer." >&2
+      exit 1
+    fi
+  fi
 else
   echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer deploy checks (root, ready)."
 fi
