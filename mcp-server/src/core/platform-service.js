@@ -4,6 +4,7 @@ import { createGithubAuthorsProvider } from "../services/github-author-visibilit
 import { requireJobSnapshot } from "./job-snapshot.js";
 import { githubPrWorkerDefinition, isGithubPrJob } from "./github-pr-worker-contract.js";
 import { buildAverrayDisclosureFooter, buildAverrayDisclosureRequirement, inspectAverrayClaimantBinding } from "./maintainer-surface-policy.js";
+import { loadMaintainerRepoClaimCapConfig } from "./maintainer-repo-claim-cap.js";
 import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
@@ -186,7 +187,8 @@ export class PlatformService {
         workerExposurePolicy: this.workerExposurePolicy,
         workerDailyExposurePolicy: this.workerDailyExposurePolicy,
         catalogueDailyBudget: this.catalogueDailyBudget,
-        depositClaimPriorityPolicy: this.depositClaimPriorityPolicy
+        depositClaimPriorityPolicy: this.depositClaimPriorityPolicy,
+        repoClaimCap: loadMaintainerRepoClaimCapConfig(process.env)
       }
     );
     this.verificationIngestionService = new VerificationIngestionService(
@@ -1078,6 +1080,7 @@ export class PlatformService {
       ).length,
       lastRunAt: status.lastRun?.startedAt ?? null
     }]));
+    const maintainerRepoClaimCap = await this.jobExecutionService.getMaintainerRepoClaimCapStatus();
 
     return {
       auth: auth
@@ -1113,7 +1116,8 @@ export class PlatformService {
         ),
         resolvedRecently: recentSessions.filter((session) => session.status === "resolved").length,
         firstWithdrawalGasGrants,
-        topJobs
+        topJobs,
+        maintainerRepoClaimCap
       },
       maintenance: {
         policy,
