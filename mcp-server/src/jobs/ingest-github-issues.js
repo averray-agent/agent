@@ -25,6 +25,7 @@ import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 export const DEFAULT_QUERY =
   'is:issue is:open archived:false label:"good first issue" (test OR docs OR typo OR validation OR error OR refactor)';
 export const DEFAULT_BASE_URL = "http://localhost:8787";
+export const MAINTAINER_STOP_COMMENT_LIMIT = 20;
 
 const POSITIVE_LABEL_SCORES = new Map([
   ["good first issue", 30],
@@ -83,15 +84,16 @@ export async function ingestGithubIssues({
     fetchImpl
   });
   const scored = await Promise.all(issues.map(async (issue) => {
-    let policy = await evaluateMaintainerSurfaceForIssue(issue, {
+    const withComments = await withStopComments(issue, { githubToken, fetchImpl });
+    let policy = await evaluateMaintainerSurfaceForIssue(withComments, {
       githubToken,
       fetchImpl,
       ...maintainerPolicy
     });
-    if (policy.allowed && maintainerCommentSources(issue).length > 0) {
+    if (policy.allowed && maintainerCommentSources(withComments).length > 0) {
       policy = { ...policy, allowed: false, reason: "maintainer_stop_signal" };
     }
-    return { issue, score: scoreIssue(issue), policy };
+    return { issue: withComments, score: scoreIssue(withComments), policy };
   }));
   const skippedRows = scored.filter(({ score, policy }) => score < minScore || !policy.allowed);
   const stopIssues = skippedRows
@@ -356,6 +358,31 @@ export function maintainerStopSources(issue, policy) {
   }
   sources.push(...maintainerCommentSources(issue));
   return [...new Set(sources)];
+}
+
+async function withStopComments(issue, { githubToken, fetchImpl }) {
+  if (Array.isArray(issue?.comments)) return issue;
+  const repo = repoFullName(issue);
+  const number = Number(issue?.number);
+  const [owner, name] = String(repo).split("/");
+  if (!owner || !name || !Number.isInteger(number) || number <= 0) return issue;
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "agent-platform-issue-ingestor"
+  };
+  if (githubToken) headers.authorization = `Bearer ${githubToken}`;
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}`,
+      { headers }
+    );
+    if (!response?.ok || typeof response.json !== "function") return issue;
+    const body = await response.json();
+    if (!Array.isArray(body)) return issue;
+    return { ...issue, comments: body.slice(0, MAINTAINER_STOP_COMMENT_LIMIT) };
+  } catch {
+    return issue;
+  }
 }
 
 function maintainerCommentSources(issue) {

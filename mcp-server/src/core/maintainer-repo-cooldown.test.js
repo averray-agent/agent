@@ -457,6 +457,7 @@ test("a close counts only for a matched footer, a later maintainer close, and th
     ["claimant_unbound", closedLookup({ binding: "missing" })],
     ["closed_at_unreported", closedLookup({ closedAt: null })],
     ["closed_before_claim", closedLookup({ closedAt: "2026-09-01T00:00:00.000Z" })],
+    ["closed_before_claim", closedLookup({ closedAt: CLAIMED_AT })],
     ["closed_by_unreported", closedLookup({ closedBy: null })],
     ["closed_by_author", closedLookup({ author: "worker", closedBy: "worker" })],
     ["pull_request_merged", closedLookup({ merged: true })],
@@ -487,6 +488,80 @@ test("a close counts only for a matched footer, a later maintainer close, and th
   assert.equal(recorded.record.cooldownUntil, new Date(Date.parse(CLOSED_AT) + 7 * DAY).toISOString());
   assert.equal(recorded.record.fullName, "new/name");
   assert.notEqual(recorded.record.cooldownUntil, new Date(observedAt.getTime() + 7 * DAY).toISOString());
+});
+
+test("the same two closes produce the same cooldown in either observation order", async () => {
+  const config = { days: 7, repeatDays: 30 };
+  const day1 = new Date("2026-10-01T00:00:00.000Z");
+  const day5 = new Date("2026-10-05T00:00:00.000Z");
+  const snapshot = async (order) => {
+    const stateStore = new MemoryStateStore();
+    for (const [pullNumber, closedAt] of order) {
+      await recordMaintainerClose({
+        stateStore, repoId: REPO_ID, fullName: "old/name", pullNumber, closedAt, now: closedAt, config
+      });
+    }
+    const record = await getMaintainerRepoCooldown(stateStore, REPO_ID);
+    return {
+      cooldownUntil: record.cooldownUntil,
+      cooldownReason: record.cooldownReason,
+      closeCount30d: record.closeCount30d,
+      lastMaintainerCloseAt: record.lastMaintainerCloseAt,
+      keys: [...record.countedPullKeys].sort()
+    };
+  };
+  const forward = await snapshot([[1, day1], [2, day5]]);
+  const reverse = await snapshot([[2, day5], [1, day1]]);
+  assert.deepEqual(forward, reverse);
+  assert.equal(forward.cooldownReason, "maintainer_close_repeat");
+  assert.equal(forward.closeCount30d, 2);
+  assert.equal(forward.lastMaintainerCloseAt, day5.toISOString());
+  assert.equal(forward.cooldownUntil, new Date(day5.getTime() + 30 * DAY).toISOString());
+
+  const stateStore = new MemoryStateStore();
+  const laterFirst = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 2, closedAt: day5, now: day5, config
+  });
+  const olderAfter = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 1, closedAt: day1, now: new Date("2026-10-20T00:00:00.000Z"), config
+  });
+  assert.ok(Date.parse(olderAfter.record.cooldownUntil) >= Date.parse(laterFirst.record.cooldownUntil));
+  assert.equal(olderAfter.record.cooldownUntil, forward.cooldownUntil);
+  assert.equal(olderAfter.record.cooldownReason, "maintainer_close_repeat");
+});
+
+test("a close from before an operator clear does not re-arm the cooldown", async () => {
+  const stateStore = new MemoryStateStore();
+  const config = { days: 7, repeatDays: 30 };
+  const day1 = new Date("2026-10-01T00:00:00.000Z");
+  const day5 = new Date("2026-10-05T00:00:00.000Z");
+  await recordMaintainerClose({ stateStore, repoId: REPO_ID, pullNumber: 1, closedAt: day1, now: day1, config });
+  await recordMaintainerClose({ stateStore, repoId: REPO_ID, pullNumber: 2, closedAt: day5, now: day5, config });
+  const clearedAt = new Date("2026-10-10T00:00:00.000Z");
+  await clearMaintainerRepoCooldown({
+    stateStore, repoId: REPO_ID, actor: WALLET, reason: "resume after review", now: clearedAt
+  });
+  const stale = await recordMaintainerClose({
+    stateStore,
+    repoId: REPO_ID,
+    pullNumber: 3,
+    closedAt: new Date("2026-10-04T00:00:00.000Z"),
+    now: new Date("2026-10-20T00:00:00.000Z"),
+    config
+  });
+  assert.equal(stale.status, "ignored");
+  assert.equal(stale.reason, "closed_before_clear");
+  const stored = await getMaintainerRepoCooldown(stateStore, REPO_ID);
+  assert.equal(stored.cooldownUntil, null);
+  assert.equal(stored.cooldownReason, null);
+
+  const freshAt = new Date("2026-10-12T00:00:00.000Z");
+  const fresh = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 4, closedAt: freshAt, now: freshAt, config
+  });
+  assert.equal(fresh.record.cooldownReason, "maintainer_close");
+  assert.equal(fresh.record.closeCount30d, 1);
+  assert.equal(fresh.record.cooldownUntil, new Date(freshAt.getTime() + 7 * DAY).toISOString());
 });
 
 test("the same pull request re-observed on days 0, 31 and 62 counts once and never extends", async () => {
@@ -613,6 +688,12 @@ test("a failed cooldown read allows the claim and a failed counter write does no
   const claimed = await logging.claimJob(OTHER_WALLET, unnamed.id, "http", "ambiguous-counter");
   assert.equal(claimed.status, "claimed");
   assert.equal(logs.some((entry) => entry.payload.event === "maintainer_repo_cooldown_counter_persist_failed"), true);
+
+  const cooled = githubJob({ id: "would-refuse-counter" });
+  const refusing = executionService([cooled], stateStore, { logs, repoCooldown: { mode: "log" } });
+  const stillClaimed = await refusing.claimJob(WALLET, cooled.id, "http", "would-refuse-counter");
+  assert.equal(stillClaimed.status, "claimed");
+  assert.ok(logs.filter((entry) => entry.payload.event === "maintainer_repo_cooldown_counter_persist_failed").length >= 2);
 });
 
 test("the pull request lookup exposes closed_at, closed_by, and baseRepo.fullName", async () => {

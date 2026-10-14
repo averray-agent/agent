@@ -210,41 +210,70 @@ export async function getMaintainerRepoCooldown(stateStore, repoId) {
   return stored ?? null;
 }
 
+function countableCloses(closes, clearedAtMs) {
+  return closes.filter((entry) => {
+    const at = Date.parse(entry.at);
+    return Number.isFinite(at) && (clearedAtMs === null || at >= clearedAtMs);
+  });
+}
+
 function nextCloseRecord(record, { repoId, fullName, key, closedAt, config }) {
   const permanent = permanentPullKeys(record);
   const resolvedName = fullName || record?.fullName || null;
   if (permanent.has(key)) {
     return {
-      ...record,
-      repoId,
-      fullName: resolvedName,
-      countedPullKeys: [...permanent]
+      record: {
+        ...record,
+        repoId,
+        fullName: resolvedName,
+        countedPullKeys: [...permanent]
+      }
+    };
+  }
+  const clearedAtMs = parseTime(record?.clearedAt);
+  if (clearedAtMs !== null && closedAt.getTime() < clearedAtMs) {
+    permanent.add(key);
+    return {
+      ignored: "closed_before_clear",
+      record: {
+        ...record,
+        repoId,
+        fullName: resolvedName,
+        countedPullKeys: [...permanent]
+      }
     };
   }
   const closes = [...storedCloses(record), { key, at: closedAt.toISOString() }];
   permanent.add(key);
-  const closeCount30d = closesInWindow(closes, closedAt.getTime()).length;
-  const shared = {
-    ...record,
-    repoId,
-    fullName: resolvedName,
-    lastMaintainerCloseAt: closedAt.toISOString(),
-    closeCount30d,
-    closes,
-    countedPullKeys: [...permanent]
-  };
-  if (record?.cooldownUntil === "indefinite") {
-    return {
-      ...shared,
-      cooldownUntil: "indefinite",
-      cooldownReason: "maintainer_stop_signal"
-    };
-  }
+  const countable = countableCloses(closes, clearedAtMs);
+  const latestMs = countable.reduce((latest, entry) => Math.max(latest, Date.parse(entry.at)), closedAt.getTime());
+  const closeCount30d = closesInWindow(countable, latestMs).length;
   const repeat = closeCount30d >= 2;
+  const proposedMs = latestMs + (repeat ? config.repeatDays : config.days) * DAY_MS;
+  let cooldownUntil = record?.cooldownUntil ?? null;
+  let cooldownReason = repeat ? "maintainer_close_repeat" : "maintainer_close";
+  if (cooldownUntil === "indefinite") {
+    cooldownReason = "maintainer_stop_signal";
+  } else {
+    const existingMs = Date.parse(cooldownUntil);
+    const keptMs = Number.isFinite(existingMs) ? Math.max(existingMs, proposedMs) : proposedMs;
+    cooldownUntil = new Date(keptMs).toISOString();
+    if (Number.isFinite(existingMs) && existingMs > proposedMs && record?.cooldownReason) {
+      cooldownReason = record.cooldownReason;
+    }
+  }
   return {
-    ...shared,
-    cooldownUntil: new Date(closedAt.getTime() + (repeat ? config.repeatDays : config.days) * DAY_MS).toISOString(),
-    cooldownReason: repeat ? "maintainer_close_repeat" : "maintainer_close"
+    record: {
+      ...record,
+      repoId,
+      fullName: resolvedName,
+      cooldownUntil,
+      cooldownReason,
+      lastMaintainerCloseAt: new Date(latestMs).toISOString(),
+      closeCount30d,
+      closes,
+      countedPullKeys: [...permanent]
+    }
   };
 }
 
@@ -275,7 +304,8 @@ export async function recordMaintainerClose({
       closedAt: at,
       config: resolved
     });
-    const saved = await stateStore.upsertServiceState(maintainerRepoCooldownScope(id), next);
+    const saved = await stateStore.upsertServiceState(maintainerRepoCooldownScope(id), next.record);
+    if (next.ignored) return { status: "ignored", reason: next.ignored, record: publicRecord(saved) };
     return { status: "recorded", record: publicRecord(saved) };
   }, logger);
 }

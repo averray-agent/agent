@@ -610,6 +610,108 @@ test("a maintainer comment stop source is distinct from an outsider issue", asyn
   assert.deepEqual(record.stopSources, ["comment:77"]);
 });
 
+test("an outsider comment does not escalate, and a fetched maintainer comment does", async () => {
+  const maintainerComment = { id: 77, author_association: "MEMBER", body: "Please stop submitting Averray pull requests." };
+  const outsiderComments = [
+    { id: 78, author_association: "CONTRIBUTOR", body: "Please stop submitting Averray pull requests." },
+    { id: 79, author_association: "NONE", body: "Please stop sending duplicate headers." }
+  ];
+  for (const [label, comments, expectCooldown] of [
+    ["outsider", outsiderComments, false],
+    ["maintainer", [maintainerComment], true]
+  ]) {
+    const store = new MemoryStateStore();
+    const platform = makePlatformService();
+    platform.stateStore = store;
+    const issue = {
+      ...ISSUE,
+      comments: 2,
+      author_association: "NONE",
+      repository: { id: 424242, full_name: "example/project" }
+    };
+    const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+      enabled: true,
+      dryRun: false,
+      queries: ["is:issue is:open label:good-first-issue"],
+      minScore: 55,
+      fetchImpl: async (url) => {
+        if (String(url).includes("/comments")) {
+          return { ok: true, async json() { return comments; } };
+        }
+        return { ok: true, async json() { return { items: [issue] }; } };
+      },
+      repoCooldown: { mode: "enforce" },
+      logger: { warn() {}, info() {} }
+    });
+    const summary = await scheduler.runOnce(new Date("2026-10-14T00:00:00.000Z"));
+    const record = await getMaintainerRepoCooldown(store, 424242);
+    if (expectCooldown) {
+      assert.equal(summary.createdCount, 0, label);
+      assert.equal(record.cooldownUntil, "indefinite", label);
+      assert.deepEqual(record.stopSources, ["comment:77"], label);
+    } else {
+      assert.equal(summary.createdCount, 1, label);
+      assert.equal(record, null, label);
+    }
+  }
+});
+
+test("a throwing stop-signal write and a throwing unattributed counter do not abort the rest of the query", async () => {
+  const now = new Date("2026-10-14T00:00:00.000Z");
+  const good = {
+    ...ISSUE,
+    number: 43,
+    html_url: "https://github.com/example/project/issues/43",
+    repository: { id: 424242, full_name: "example/project" }
+  };
+  const stop = {
+    ...ISSUE,
+    body: "Please stop submitting Averray pull requests.",
+    author_association: "OWNER",
+    repository: { id: 424242, full_name: "example/project" }
+  };
+  const stopStore = new MemoryStateStore();
+  const stopUpsert = stopStore.upsertServiceState.bind(stopStore);
+  stopStore.upsertServiceState = async (scope, value) => {
+    if (String(scope).startsWith("maintainer-repo-cooldown:") && value?.cooldownReason === "maintainer_stop_signal") {
+      throw new Error("stop write down");
+    }
+    return stopUpsert(scope, value);
+  };
+  const stopPlatform = makePlatformService();
+  stopPlatform.stateStore = stopStore;
+  const stopRun = await new GithubIssueIngestionScheduler(stopPlatform, undefined, {
+    enabled: true, dryRun: false, queries: ["q"], minScore: 55, maxJobsPerRun: 2, maxJobsPerQuery: 2,
+    fetchImpl: async () => ({ ok: true, async json() { return { items: [stop, good] }; } }),
+    repoCooldown: { mode: "enforce" }, logger: { warn() {}, info() {} }
+  }).runOnce(now);
+  assert.equal(stopRun.errors.length, 0);
+  assert.equal(stopRun.createdCount, 1);
+  assert.equal(stopPlatform.listJobs().length, 1);
+
+  const counterStore = new MemoryStateStore();
+  const counterUpsert = counterStore.upsertServiceState.bind(counterStore);
+  counterStore.upsertServiceState = async (scope, value) => {
+    if (scope === "maintainer-repo-cooldown-counters") throw new Error("unattributed counter down");
+    return counterUpsert(scope, value);
+  };
+  const unattributed = {
+    ...ISSUE,
+    body: "Please stop submitting Averray pull requests.",
+    author_association: "OWNER"
+  };
+  const counterPlatform = makePlatformService();
+  counterPlatform.stateStore = counterStore;
+  const counterRun = await new GithubIssueIngestionScheduler(counterPlatform, undefined, {
+    enabled: true, dryRun: false, queries: ["q"], minScore: 55, maxJobsPerRun: 2, maxJobsPerQuery: 2,
+    fetchImpl: async () => ({ ok: true, async json() { return { items: [unattributed, good] }; } }),
+    repoCooldown: { mode: "enforce" }, logger: { warn() {}, info() {} }
+  }).runOnce(now);
+  assert.equal(counterRun.errors.length, 0);
+  assert.equal(counterRun.createdCount, 1);
+  assert.equal(counterPlatform.listJobs().length, 1);
+});
+
 test("a counter write that throws in log mode still ingests the rest of the batch", async () => {
   const store = new MemoryStateStore();
   const original = store.upsertServiceState.bind(store);

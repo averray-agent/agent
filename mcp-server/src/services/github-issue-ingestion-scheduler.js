@@ -243,15 +243,7 @@ export class GithubIssueIngestionScheduler {
 
   async recordIngestStopSignals(skippedDetails, now) {
     for (const detail of skippedDetails) {
-      try {
-        await this.recordOneIngestStopSignal(detail, now);
-      } catch {
-        this.logger?.warn?.({
-          event: "maintainer_repo_cooldown_observe_failed",
-          repoId: positiveGithubRepoId(detail?.repoId),
-          code: "maintainer_repo_cooldown_observe_failed"
-        }, "maintainer_repo_cooldown_observe_failed");
-      }
+      await this.recordOneIngestStopSignal(detail, now);
     }
   }
 
@@ -277,14 +269,22 @@ export class GithubIssueIngestionScheduler {
       return;
     }
     for (const source of sources) {
-      await recordMaintainerStopSignal({
-        stateStore,
-        repoId,
-        fullName: detail.repo,
-        source,
-        now,
-        logger: this.logger
-      });
+      try {
+        await recordMaintainerStopSignal({
+          stateStore,
+          repoId,
+          fullName: detail.repo,
+          source,
+          now,
+          logger: this.logger
+        });
+      } catch {
+        this.logger?.warn?.({
+          event: "maintainer_repo_cooldown_observe_failed",
+          repoId,
+          code: "maintainer_repo_cooldown_observe_failed"
+        }, "maintainer_repo_cooldown_observe_failed");
+      }
     }
   }
 
