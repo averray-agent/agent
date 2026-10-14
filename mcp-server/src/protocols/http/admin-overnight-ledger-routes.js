@@ -16,6 +16,14 @@ export function createAdminOvernightLedgerRoutes({
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/admin/ops/bank-moves") {
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
+      respond(response, 200, await overnightLedger.getBankMoves(url.searchParams.get("since"), {
+        limit: url.searchParams.get("limit")
+      }), { "cache-control": "no-store" });
+      return true;
+    }
+
     return false;
   };
 }
