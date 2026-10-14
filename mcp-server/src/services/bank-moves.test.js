@@ -8,7 +8,8 @@ import { OvernightLedgerService } from "./overnight-ledger.js";
 import {
   BANK_MOVES_SCHEMA,
   NOT_REPORTED,
-  buildBankMoves
+  buildBankMoves,
+  parseBankMovesLimit
 } from "./bank-moves.js";
 
 const USDC = DEFAULT_ESCROW_ASSET.address;
@@ -194,7 +195,7 @@ test("reserve, release, and settle join only on the same transaction", () => {
   assert.equal(byId.get("settle").work.jobId, settled.jobId);
   assert.equal(byId.get("settle").work.status, "settled");
   assert.equal(byId.get("settle").amount.direction, "out");
-  assert.match(byId.get("settle").line, /^-1\.00 settled/u);
+  assert.match(byId.get("settle").line, /^-1\.00 USDC settled/u);
 });
 
 test("a failed join reports the job as not reported and does not borrow a nearby session", () => {
@@ -293,7 +294,7 @@ test("tags use history before the move, and self keeps a wallet that would other
   });
   assert.equal(
     move.line,
-    "+1.00 reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge"
+    "+1.00 USDC reserved · job pr-quanta-js-quanta-212 (git-patch-tests-v1) · 0x2e3c…91 regular (5 jobs, 3 settled, 1 rejected, 1 open, since Sep 28) · MCP, client \"claude-code\", stage claimed · claim expires 14:20Z, payout on merge"
   );
   assert.equal(move.work.repo, "quanta-js/quanta");
   assert.equal(move.work.referenceKind, "issue");
@@ -434,7 +435,7 @@ test("a deposit has no job and is tagged self", () => {
   assert.equal(move.arrival.funnelStage, NOT_REPORTED);
   assert.equal(move.arrival.clientSoftware, NOT_REPORTED);
   assert.equal(move.next.claimExpiresAt, NOT_REPORTED);
-  assert.equal(move.line, `+10.00 deposited · no job · 0x1111…11 self · ${NOT_REPORTED}, client "${NOT_REPORTED}", stage ${NOT_REPORTED} · ${NOT_REPORTED}`);
+  assert.equal(move.line, `+10.00 USDC deposited · no job · 0x1111…11 self · ${NOT_REPORTED}, client "${NOT_REPORTED}", stage ${NOT_REPORTED} · ${NOT_REPORTED}`);
   assert.equal(JSON.stringify(move).includes("\"0\""), false);
   assert.equal(JSON.stringify(move).includes("192.0.2.9"), false);
 });
@@ -554,9 +555,9 @@ test("fee and retention legs keep the worker tag and never introduce the recipie
     assert.equal(move.line.includes(treasury), false);
     assert.equal(move.line.includes("first arrival"), false);
   }
-  assert.match(byId.get("worker-leg").line, /^-1\.00 settled ·/u);
-  assert.match(byId.get("fee-leg").line, /^-0\.05 settled fee ·/u);
-  assert.match(byId.get("retention-leg").line, /^-0\.02 settled retention ·/u);
+  assert.match(byId.get("worker-leg").line, /^-1\.00 USDC settled ·/u);
+  assert.match(byId.get("fee-leg").line, /^-0\.05 USDC settled fee ·/u);
+  assert.match(byId.get("retention-leg").line, /^-0\.02 USDC settled retention ·/u);
 });
 
 test("cancel and dispute resolution join refunds, and dispute resolution joins settles", () => {
@@ -646,6 +647,213 @@ test("a later JobClosed of an already rejected job stays rejected", () => {
   assert.equal(move.attribution.basis, "escrow.job_closed");
   assert.equal(move.work.status, "rejected");
   assert.match(move.line, /job rejected-job \(git-patch-tests-v1\) rejected/u);
+});
+
+test("a reopened job does not give the refund to a later claimant", () => {
+  const later = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const earlier = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
+  const session = claim({
+    sessionId: "J:B",
+    jobId: "J",
+    wallet: later,
+    claimedAt: "2026-10-13T12:00:00.000Z"
+  });
+  const result = feed({
+    sessions: [session],
+    events: [
+      accountEvent("refund", "account.reservation_released", hash("reject"), { at: "2026-10-13T10:00:00.000Z" }),
+      {
+        id: "rejected-a",
+        topic: "escrow.job_rejected",
+        txHash: hash("reject"),
+        timestamp: "2026-10-13T10:00:00.000Z",
+        jobId: "J",
+        sessionId: "J:A",
+        data: { job: { worker: earlier } }
+      }
+    ],
+    extra: { since: "2026-10-01T00:00:00.000Z" }
+  });
+  const move = result.moves[0];
+  assert.equal(move.work.jobId, NOT_REPORTED);
+  assert.equal(move.work.status, NOT_REPORTED);
+  assert.equal(move.wallet.address, NOT_REPORTED);
+  assert.equal(move.line.includes("job not reported"), true);
+  assert.equal(move.line.includes("0xaaaa"), false);
+  assert.equal(move.line.includes("0xbbbb"), false);
+  assert.equal(move.line.includes("first arrival"), false);
+});
+
+test("two claimants already on a reopened job are not collapsed to the first session", () => {
+  const alpha = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
+  const beta = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const first = claim({
+    sessionId: "J:A",
+    jobId: "J",
+    wallet: alpha,
+    claimedAt: "2026-10-13T09:00:00.000Z"
+  });
+  const second = claim({
+    sessionId: "J:B",
+    jobId: "J",
+    wallet: beta,
+    claimedAt: "2026-10-13T09:30:00.000Z"
+  });
+  const result = feed({
+    sessions: [second, first],
+    events: [
+      accountEvent("refund", "account.reservation_released", hash("reject"), { at: "2026-10-13T10:00:00.000Z" }),
+      {
+        id: "rejected-shared",
+        topic: "escrow.job_rejected",
+        txHash: hash("reject"),
+        timestamp: "2026-10-13T10:00:00.000Z",
+        jobId: "J"
+      }
+    ],
+    extra: { since: "2026-10-01T00:00:00.000Z" }
+  });
+  const move = result.moves[0];
+  assert.equal(move.work.jobId, NOT_REPORTED);
+  assert.equal(move.work.status, NOT_REPORTED);
+  assert.equal(move.wallet.address, NOT_REPORTED);
+  assert.equal(move.wallet.tag, "ambiguous");
+  assert.equal(move.line.includes("job not reported"), true);
+  assert.equal(move.line.includes("0xaaaa"), false);
+  assert.equal(move.line.includes("0xbbbb"), false);
+});
+
+test("a reserve joined only by job id is not marked claimed", () => {
+  const result = feed({
+    events: [
+      accountEvent("reserve", "account.reserved", hash("chain")),
+      {
+        id: "funded-only",
+        topic: "escrow.job_funded",
+        txHash: hash("chain"),
+        timestamp: MOVE,
+        jobId: "J"
+      }
+    ]
+  });
+  assert.equal(result.moves[0].work.jobId, NOT_REPORTED);
+  assert.equal(result.moves[0].work.status, NOT_REPORTED);
+  assert.equal(result.moves[0].wallet.address, NOT_REPORTED);
+  assert.match(result.moves[0].line, /job not reported/u);
+});
+
+test("settled and rejected counts use only outcomes from before the move", () => {
+  const settledLater = approved("job-later", WORKER, "2026-10-13T08:00:00.000Z", "2026-10-13T19:00:00.000Z");
+  const rejectedLater = {
+    sessionId: "job-reject-later",
+    jobId: "job-reject-later",
+    wallet: WORKER,
+    status: "rejected",
+    claimedAt: "2026-10-13T09:00:00.000Z",
+    rejectedAt: "2026-10-13T19:00:00.000Z",
+    verificationSummary: { outcome: "rejected" }
+  };
+  const current = claim();
+  const result = feed({
+    sessions: [settledLater, rejectedLater, current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("reserve")),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ]
+  });
+  const move = result.moves[0];
+  assert.equal(move.wallet.tag, "returning");
+  assert.deepEqual(move.wallet.counts, {
+    jobs: 2,
+    settled: 0,
+    rejected: 0,
+    open: 0,
+    firstSeen: "2026-10-13T08:00:00.000Z"
+  });
+  assert.match(move.line, /returning \(2 jobs, 0 settled, 0 rejected, 0 open, since Oct 13\)/u);
+});
+
+test("an equal timestamp is not history before the move", () => {
+  const sameInstant = claim({
+    sessionId: "same-instant",
+    jobId: "other-job",
+    claimedAt: MOVE
+  });
+  const current = claim();
+  const arrival = feed({
+    sessions: [sameInstant, current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("reserve")),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ]
+  });
+  assert.equal(arrival.moves[0].wallet.tag, "first arrival");
+  assert.equal(arrival.moves[0].wallet.counts, NOT_REPORTED);
+
+  const settledOnTheDot = approved("job-equal", WORKER, "2026-10-13T08:00:00.000Z", MOVE);
+  const counted = feed({
+    sessions: [settledOnTheDot, current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("reserve")),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ]
+  });
+  assert.equal(counted.moves[0].wallet.tag, "returning");
+  assert.equal(counted.moves[0].wallet.counts.settled, 0);
+  assert.equal(counted.moves[0].wallet.counts.jobs, 1);
+});
+
+test("client software cannot carry markup into the line", () => {
+  const current = claim();
+  const result = feed({
+    sessions: [current],
+    events: [
+      accountEvent("reserve", "account.reserved", hash("reserve")),
+      escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId)
+    ],
+    arrivalRecords: new Map([[WORKER, { clientName: `claude<script>&"name"` }]])
+  });
+  assert.match(result.moves[0].line, /client "claudescriptname"/u);
+  assert.equal(result.moves[0].line.includes("<"), false);
+  assert.equal(result.moves[0].line.includes(">"), false);
+  assert.equal(result.moves[0].line.includes("&"), false);
+});
+
+test("limit accepts only plain decimal integers from 1 to 200", () => {
+  assert.equal(parseBankMovesLimit("1"), 1);
+  assert.equal(parseBankMovesLimit("200"), 200);
+  assert.equal(parseBankMovesLimit(1), 1);
+  assert.equal(parseBankMovesLimit(200), 200);
+  for (const value of ["0", "201", "0x10", "1e2", "01", "1.0", "+1"]) {
+    assert.throws(
+      () => parseBankMovesLimit(value),
+      (error) => error.details?.field === "limit",
+      String(value)
+    );
+  }
+  const current = claim({ sessionId: "old-session", jobId: "job-old", claimedAt: "2026-10-12T00:00:00.000Z" });
+  const next = claim({ sessionId: "new-session", jobId: "job-new", claimedAt: "2026-10-13T12:00:00.000Z" });
+  const events = [
+    accountEvent("old", "account.reserved", hash("reserve"), { at: "2026-10-12T00:00:00.000Z" }),
+    escrow("escrow.job_funded", hash("reserve"), current.jobId, current.sessionId),
+    accountEvent("new", "account.reserved", hash("stray"), { at: "2026-10-13T12:00:00.000Z" }),
+    escrow("escrow.job_funded", hash("stray"), next.jobId, next.sessionId)
+  ];
+  const one = feed({
+    sessions: [current, next],
+    events,
+    extra: { since: "2026-10-01T00:00:00.000Z", limit: "1" }
+  });
+  assert.equal(one.limit, 1);
+  assert.equal(one.returnedCount, 1);
+  assert.equal(one.hasMore, true);
+  const all = feed({
+    sessions: [current, next],
+    events,
+    extra: { since: "2026-10-01T00:00:00.000Z", limit: "200" }
+  });
+  assert.equal(all.limit, 200);
+  assert.equal(all.returnedCount, 2);
 });
 
 test("a quiet tick parks the cursor and the next tick returns only the new move", () => {
@@ -793,4 +1001,37 @@ test("the ledger service reads bank moves for the signer and leaves other accoun
   const ledger = await service.getLedger("24h");
   assert.equal(typeof ledger.reconciliation.match, "string");
   assert.equal("moves" in ledger, false);
+});
+
+test("invalid bank-move query params fail before the session and event scan", async () => {
+  let scanned = false;
+  const store = {
+    async listRecentSessions() {
+      scanned = true;
+      return [];
+    },
+    async listEventLog() {
+      scanned = true;
+      return { events: [], gap: false };
+    },
+    async getServiceState() {
+      scanned = true;
+      return {};
+    }
+  };
+  const service = new OvernightLedgerService({
+    stateStore: store,
+    selfIdentityRegistry: new SelfIdentityRegistry(),
+    env: { AUTH_CHAIN_ID: "999999", SIGNER_ADDRESS: BANK },
+    now: () => new Date(MOVE)
+  });
+  await assert.rejects(
+    () => service.getBankMoves("2026-10-01T00:00:00.000Z", { limit: "0x10" }),
+    (error) => error.details?.field === "limit"
+  );
+  await assert.rejects(
+    () => service.getBankMoves("not-a-timestamp", { limit: "1e2" }),
+    (error) => error.details?.field === "limit"
+  );
+  assert.equal(scanned, false);
 });

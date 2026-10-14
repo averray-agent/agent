@@ -13,7 +13,9 @@ import {
   BANK_MOVES_EVENT_READ_LIMIT,
   bankMoveWallets,
   buildBankMoves,
-  loadWalletArrivalRecords
+  loadWalletArrivalRecords,
+  parseBankMovesLimit,
+  parseBankMovesSince
 } from "./bank-moves.js";
 
 const USDC_DECIMALS = 6;
@@ -183,6 +185,8 @@ export class OvernightLedgerService {
   }
 
   async getBankMoves(since, { limit } = {}) {
+    parseBankMovesSince(since);
+    parseBankMovesLimit(limit);
     if (!this.stateStore?.listRecentSessions || !this.stateStore?.listEventLog) {
       throw new Error("Bank move sources unavailable");
     }

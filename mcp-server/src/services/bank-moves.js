@@ -79,6 +79,11 @@ const VERBS = Object.freeze({
  * is that worker stays `settled`. Any other recipient is `settled fee`, or
  * `settled retention` when exactly one such leg matches a same-transaction
  * GasRetentionApplied amount. Fee and retention recipients are never tagged.
+ *
+ * A reserve, refund, or settle attaches a session only when that claim started
+ * at or before the move and the escrow event's sessionId and job.worker do not
+ * disagree with it. Zero or several survivors are "job not reported"; the
+ * worker is not reported and a neighbour's wallet is never used.
  */
 export function buildBankMoves({
   since,
@@ -184,7 +189,11 @@ export function parseBankMovesSince(value) {
 
 export function parseBankMovesLimit(value) {
   if (value === undefined || value === null || value === "") return BANK_MOVES_DEFAULT_LIMIT;
-  const parsed = Number(value);
+  const raw = String(value).trim();
+  if (!/^(?:[1-9][0-9]*)$/u.test(raw)) {
+    throw new ValidationError("limit must be an integer from 1 to 200.", { field: "limit", value });
+  }
+  const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > BANK_MOVES_MAX_LIMIT) {
     throw new ValidationError("limit must be an integer from 1 to 200.", { field: "limit", value });
   }
@@ -241,7 +250,7 @@ function attributeMove({
   registry,
   historyComplete
 }) {
-  const join = joinMove(kind, txEvents, sessions);
+  const join = joinMove(kind, txEvents, sessions, Date.parse(at));
   const wallet = workerWallet(kind, event, join);
   const moveMs = Date.parse(at);
   const earlier = wallet ? earlierSessions(sessions, wallet, moveMs, join.session?.sessionId) : [];
@@ -299,39 +308,53 @@ function attributeMove({
   };
 }
 
-function joinMove(kind, txEvents, sessions) {
+function joinMove(kind, txEvents, sessions, moveMs) {
   if (kind === "deposit") return { joined: true, session: undefined, basis: "deposit" };
   const topics = new Set(JOIN_TOPICS[kind] ?? []);
   const matches = txEvents.filter((event) => topics.has(event.topic));
   const keys = matches.map(eventJobKey);
-  const candidates = sessions.filter((session) => keys.length > 0 && keys.every((key) => eventMatchesSession(session, key)));
-  if (candidates.length === 1) {
-    return { joined: true, session: candidates[0], basis: basisFor(kind, matches), jobId: candidates[0].jobId };
+  if (keys.length === 0 || !Number.isFinite(moveMs)) {
+    return { joined: false, session: undefined, basis: NOT_REPORTED };
   }
-  const ids = unique(keys.map((key) => key.jobId || key.chainJobId).filter(Boolean));
-  if (ids.length === 1) {
-    return { joined: true, session: undefined, basis: basisFor(kind, matches), jobId: ids[0] };
+  const candidates = sessions.filter((session) => (
+    claimStartedAtOrBefore(session, moveMs)
+    && keys.every((key) => sessionAgrees(session, key))
+  ));
+  if (candidates.length !== 1) {
+    return { joined: false, session: undefined, basis: NOT_REPORTED };
   }
-  return { joined: false, session: undefined, basis: NOT_REPORTED };
+  return {
+    joined: true,
+    session: candidates[0],
+    basis: basisFor(kind, matches),
+    jobId: candidates[0].jobId
+  };
 }
 
 function eventJobKey(event) {
   return {
     jobId: text(event?.jobId) || text(event?.data?.jobId) || text(event?.data?.job?.id),
     chainJobId: text(event?.data?.chainJobId),
-    sessionId: text(event?.sessionId)
+    sessionId: text(event?.sessionId),
+    worker: normalizeAddress(event?.data?.job?.worker)
   };
 }
 
-function eventMatchesSession(session, key) {
-  // A derived session id from before the claim row exists must not hide the
-  // chain job id ensureJob already emitted.
-  if (key.sessionId && session?.sessionId === key.sessionId) return true;
-  if (key.jobId && (sameId(session?.jobId, key.jobId) || sameId(session?.chainJobId, key.jobId))) return true;
-  if (key.chainJobId && (sameId(session?.chainJobId, key.chainJobId) || sameId(session?.jobId, key.chainJobId))) {
-    return true;
-  }
-  return false;
+function claimStartedAtOrBefore(session, moveMs) {
+  const claimedAt = Date.parse(session?.claimedAt ?? "");
+  return Number.isFinite(claimedAt) && claimedAt <= moveMs;
+}
+
+function sessionAgrees(session, key) {
+  if (key.sessionId && session?.sessionId !== key.sessionId) return false;
+  const wallet = normalizeAddress(session?.wallet);
+  if (key.worker && wallet !== key.worker) return false;
+  const jobMatches = Boolean(
+    (key.jobId && (sameId(session?.jobId, key.jobId) || sameId(session?.chainJobId, key.jobId)))
+    || (key.chainJobId && (sameId(session?.chainJobId, key.chainJobId) || sameId(session?.jobId, key.chainJobId)))
+  );
+  if ((key.jobId || key.chainJobId) && !jobMatches) return false;
+  return Boolean(key.sessionId || key.jobId || key.chainJobId);
 }
 
 function basisFor(kind, matches) {
@@ -409,7 +432,7 @@ function classifyTag({
     return { tag: "ambiguous", counts: NOT_REPORTED };
   }
   if (earlier.length === 0) return { tag: "first arrival", counts: NOT_REPORTED };
-  const counts = countHistory(earlier);
+  const counts = countHistory(earlier, moveMs);
   if (earlier.some((row) => approvedInWindow(row, moveMs))) return { tag: "regular", counts };
   return { tag: "returning", counts };
 }
@@ -420,7 +443,7 @@ function approvedInWindow(session, moveMs) {
   return Number.isFinite(at) && at > moveMs - RETAINED_WINDOW_MS && at < moveMs;
 }
 
-function countHistory(sessions) {
+function countHistory(sessions, moveMs) {
   const jobs = new Set();
   let settled = 0;
   let rejected = 0;
@@ -430,8 +453,14 @@ function countHistory(sessions) {
     jobs.add(String(session.jobId ?? session.sessionId));
     const at = earliestActivity(session);
     if (Number.isFinite(at) && at < firstSeenMs) firstSeenMs = at;
-    if (approvedSettlement(session)) settled += 1;
-    else if (session.status === "rejected" || settlementOutcome(session) === "rejected") rejected += 1;
+    const resolvedAt = Date.parse(session?.resolvedAt ?? "");
+    const rejectedAt = Date.parse(session?.rejectedAt ?? "");
+    if (approvedSettlement(session) && Number.isFinite(resolvedAt) && resolvedAt < moveMs) settled += 1;
+    else if (
+      (session.status === "rejected" || settlementOutcome(session) === "rejected")
+      && Number.isFinite(rejectedAt)
+      && rejectedAt < moveMs
+    ) rejected += 1;
     else if (OPEN_STATUSES.has(session.status)) open += 1;
   }
   return {
@@ -502,6 +531,7 @@ function publicWork(work) {
 }
 
 function moveStatus(kind, join, events, at) {
+  if (!join.session) return NOT_REPORTED;
   if (kind === "reserve") return "claimed";
   if (kind === "settle") return "settled";
   if (kind === "refund") {
@@ -608,7 +638,7 @@ function nextOf(kind, session, job) {
 function lineFor({ amount, kind, part, work, wallet, arrival, next, at }) {
   const signed = amount.display === NOT_REPORTED
     ? NOT_REPORTED
-    : `${amount.direction === "out" ? "-" : "+"}${amount.display}`;
+    : `${amount.direction === "out" ? "-" : "+"}${amount.display}${amount.asset === NOT_REPORTED ? "" : ` ${amount.asset}`}`;
   return [
     `${signed} ${verbFor(kind, part)}`,
     workLine(work),
@@ -802,7 +832,7 @@ function clockLabel(iso) {
 }
 
 function lineToken(value) {
-  return String(value).replace(/[\u0000-\u001f"]/gu, "").replaceAll("·", "-");
+  return String(value).replace(/[\u0000-\u001f"<>&]/gu, "").replaceAll("·", "-");
 }
 
 function addressSet(values) {
@@ -821,10 +851,6 @@ function normalizeHash(value) {
 
 function sameId(left, right) {
   return Boolean(left) && Boolean(right) && String(left).toLowerCase() === String(right).toLowerCase();
-}
-
-function unique(values) {
-  return [...new Set(values)];
 }
 
 function text(value) {
