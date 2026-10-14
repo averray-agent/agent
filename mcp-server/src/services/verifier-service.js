@@ -138,6 +138,8 @@ export class VerifierService {
         lookup: verdict?.githubLookup,
         job,
         sessionStatus: session.status,
+        claimedAt: session.claimedAt,
+        submittedAt: session.submittedAt,
         logger: this.logger
       });
     } catch {

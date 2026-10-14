@@ -286,24 +286,45 @@ export class JobExecutionService {
       const record = await getMaintainerRepoCooldown(this.stateStore, repoId);
       return readCooldownDecision(record);
     } catch {
+      this.logger?.warn?.({
+        event: "maintainer_repo_cooldown_read_failed",
+        repoId,
+        code: "maintainer_repo_cooldown_read_failed"
+      }, "maintainer_repo_cooldown_read_failed");
       return { active: false, unmeasured: true };
     }
   }
 
   async noteMaintainerRepoCooldownWouldRefuse(details) {
-    await incrementMaintainerRepoCooldownCounter(this.stateStore, "wouldRefuse", this.logger, {
-      event: "maintainer_repo_cooldown_would_refuse",
-      surface: "claim",
-      ...details
-    });
+    try {
+      await incrementMaintainerRepoCooldownCounter(this.stateStore, "wouldRefuse", this.logger, {
+        event: "maintainer_repo_cooldown_would_refuse",
+        surface: "claim",
+        ...details
+      });
+    } catch {
+      this.logger?.warn?.({
+        event: "maintainer_repo_cooldown_counter_persist_failed",
+        surface: "claim",
+        repoId: details?.repoId ?? null
+      }, "maintainer_repo_cooldown_counter_persist_failed");
+    }
   }
 
   async noteMaintainerRepoCooldownAmbiguous(reason) {
-    await incrementMaintainerRepoCooldownCounter(this.stateStore, "ambiguous", this.logger, {
-      event: "maintainer_repo_cooldown_ambiguous",
-      surface: "claim",
-      reason
-    });
+    try {
+      await incrementMaintainerRepoCooldownCounter(this.stateStore, "ambiguous", this.logger, {
+        event: "maintainer_repo_cooldown_ambiguous",
+        surface: "claim",
+        reason
+      });
+    } catch {
+      this.logger?.warn?.({
+        event: "maintainer_repo_cooldown_counter_persist_failed",
+        surface: "claim",
+        reason
+      }, "maintainer_repo_cooldown_counter_persist_failed");
+    }
   }
 
   async getMaintainerRepoCooldownStatus() {
@@ -311,6 +332,8 @@ export class JobExecutionService {
     return {
       mode: this.repoCooldown.mode,
       wouldRefuse: counters.wouldRefuse,
+      wouldRefuseClaim: counters.wouldRefuseClaim,
+      wouldRefuseIngest: counters.wouldRefuseIngest,
       ambiguous: counters.ambiguous,
       days: this.repoCooldown.days,
       repeatDays: this.repoCooldown.repeatDays

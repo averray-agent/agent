@@ -202,6 +202,8 @@ export class GithubPrReviewService {
       lookup: upstream,
       job,
       sessionStatus: session?.status,
+      claimedAt: session?.claimedAt,
+      submittedAt: session?.submittedAt,
       now,
       config: this.repoCooldown,
       logger: this.logger

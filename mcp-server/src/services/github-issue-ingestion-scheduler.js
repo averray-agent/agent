@@ -192,7 +192,16 @@ export class GithubIssueIngestionScheduler {
               // Missing jobs are expected and created below.
             }
           }
-          const cooldownSkip = await this.maintainerRepoCooldownSkip(job, now);
+          let cooldownSkip = null;
+          try {
+            cooldownSkip = await this.maintainerRepoCooldownSkip(job, now);
+          } catch {
+            this.logger?.warn?.({
+              event: "maintainer_repo_cooldown_counter_persist_failed",
+              surface: "ingest",
+              repoId: positiveGithubRepoId(job?.source?.githubRepoId)
+            }, "maintainer_repo_cooldown_counter_persist_failed");
+          }
           if (cooldownSkip) {
             querySummary.skipped.push(cooldownSkip);
             if (cooldownSkip.enforced) continue;
@@ -233,32 +242,49 @@ export class GithubIssueIngestionScheduler {
   }
 
   async recordIngestStopSignals(skippedDetails, now) {
-    const stateStore = this.platformService?.stateStore;
     for (const detail of skippedDetails) {
-      if (detail?.reason !== "maintainer_stop_signal") continue;
-      const repoId = positiveGithubRepoId(detail.repoId);
-      if (!repoId) {
+      try {
+        await this.recordOneIngestStopSignal(detail, now);
+      } catch {
+        this.logger?.warn?.({
+          event: "maintainer_repo_cooldown_observe_failed",
+          repoId: positiveGithubRepoId(detail?.repoId),
+          code: "maintainer_repo_cooldown_observe_failed"
+        }, "maintainer_repo_cooldown_observe_failed");
+      }
+    }
+  }
+
+  async recordOneIngestStopSignal(detail, now) {
+    if (detail?.reason !== "maintainer_stop_signal" || detail.escalates !== true) return;
+    const stateStore = this.platformService?.stateStore;
+    const repoId = positiveGithubRepoId(detail.repoId);
+    const sources = Array.isArray(detail.stopSources) ? detail.stopSources : [];
+    if (!repoId || sources.length === 0) {
+      try {
         await incrementMaintainerRepoCooldownCounter(stateStore, "ambiguous", this.logger, {
           event: "maintainer_repo_cooldown_ambiguous",
           surface: "ingest",
           reason: "repo_unattributed"
         });
-        continue;
-      }
-      try {
-        await recordMaintainerStopSignal({
-          stateStore,
-          repoId,
-          fullName: detail.repo,
-          now
-        });
       } catch {
         this.logger?.warn?.({
-          event: "maintainer_repo_cooldown_observe_failed",
-          repoId,
-          code: "maintainer_repo_cooldown_observe_failed"
-        }, "maintainer_repo_cooldown_observe_failed");
+          event: "maintainer_repo_cooldown_counter_persist_failed",
+          surface: "ingest",
+          reason: "repo_unattributed"
+        }, "maintainer_repo_cooldown_counter_persist_failed");
       }
+      return;
+    }
+    for (const source of sources) {
+      await recordMaintainerStopSignal({
+        stateStore,
+        repoId,
+        fullName: detail.repo,
+        source,
+        now,
+        logger: this.logger
+      });
     }
   }
 

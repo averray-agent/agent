@@ -7,6 +7,7 @@ import { measureMaintainerRepoClaimUsage } from "./maintainer-repo-claim-cap.js"
 import { buildJobSnapshot } from "./job-snapshot.js";
 import { normalizeSubmission } from "./submission.js";
 import { VerifierService } from "../services/verifier-service.js";
+import { VerifierRegistry } from "../services/verifier-handlers.js";
 import {
   classifyMaintainerClose,
   clearMaintainerRepoCooldown,
@@ -26,13 +27,30 @@ const REPO_ID = 424242;
 const NOW = new Date("2026-10-14T00:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
 
-function closedLookup({ pullNumber = 9, repoId = REPO_ID, fullName = "old/name", merged = false, state = "closed" } = {}) {
+const CLAIMED_AT = "2026-10-01T00:00:00.000Z";
+const CLOSED_AT = "2026-10-10T00:00:00.000Z";
+
+function closedLookup({
+  pullNumber = 9,
+  repoId = REPO_ID,
+  fullName = "new/name",
+  merged = false,
+  state = "closed",
+  closedAt = CLOSED_AT,
+  author = "worker",
+  closedBy = "maintainer",
+  binding = "matched"
+} = {}) {
   return {
     status: "verified",
     state,
     merged,
     pullNumber,
-    baseRepo: { id: repoId, full_name: fullName }
+    closedAt,
+    author: author ? { login: author } : null,
+    closedBy: closedBy ? { login: closedBy } : null,
+    claimantBinding: binding ? { status: binding } : null,
+    baseRepo: { id: repoId, fullName }
   };
 }
 
@@ -40,7 +58,12 @@ function executionService(jobs, stateStore, { repoCooldown, logs } = {}) {
   const map = new Map(jobs.map((job) => [job.id, job]));
   const config = {};
   if (repoCooldown !== undefined) config.repoCooldown = repoCooldown;
-  if (logs) config.logger = { info(payload, message) { logs.push({ payload, message }); } };
+  if (logs) {
+    config.logger = {
+      info(payload, message) { logs.push({ payload, message }); },
+      warn(payload, message) { logs.push({ payload, message }); }
+    };
+  }
   return new JobExecutionService(
     stateStore,
     undefined,
@@ -133,7 +156,7 @@ test("a stop signal sets indefinite and only the operator clear removes it", asy
   const logs = [];
   const logger = { info(payload, message) { logs.push({ payload, message }); } };
   const stopped = await recordMaintainerStopSignal({
-    stateStore, repoId: REPO_ID, fullName: "old/name", now: NOW
+    stateStore, repoId: REPO_ID, fullName: "old/name", source: "policy:CONTRIBUTING.md", now: NOW
   });
   assert.equal(stopped.record.cooldownUntil, "indefinite");
   assert.equal(stopped.record.cooldownReason, "maintainer_stop_signal");
@@ -172,6 +195,24 @@ test("a stop signal sets indefinite and only the operator clear removes it", asy
   assert.equal(logs[0].payload.actor, WALLET);
   assert.equal(logs[0].payload.reason, "maintainer asked us to resume");
   assert.equal(readCooldownDecision(await getMaintainerRepoCooldown(stateStore, REPO_ID), NOW).active, false);
+  const again = await clearMaintainerRepoCooldown({
+    stateStore, repoId: REPO_ID, actor: WALLET, reason: "clear again", now: new Date(NOW.getTime() + 3 * DAY)
+  });
+  assert.equal(again.cleared, true);
+  assert.equal(again.cooldownUntil, null);
+
+  const rearmed = await recordMaintainerStopSignal({
+    stateStore, repoId: REPO_ID, source: "policy:CONTRIBUTING.md", now: new Date(NOW.getTime() + 4 * DAY)
+  });
+  assert.equal(rearmed.status, "ignored");
+  assert.equal(rearmed.reason, "stop_source_acknowledged");
+  assert.equal((await getMaintainerRepoCooldown(stateStore, REPO_ID)).cooldownUntil, null);
+
+  const fresh = await recordMaintainerStopSignal({
+    stateStore, repoId: REPO_ID, source: "policy:CODE_OF_CONDUCT.md", now: new Date(NOW.getTime() + 5 * DAY)
+  });
+  assert.equal(fresh.record.cooldownUntil, "indefinite");
+  assert.equal(readCooldownDecision(await getMaintainerRepoCooldown(stateStore, REPO_ID)).active, true);
 
   await assert.rejects(
     () => clearMaintainerRepoCooldown({
@@ -298,7 +339,11 @@ test("log mode never refuses a cooled-down repository and increments wouldRefuse
   assert.equal(status.mode, "log");
   assert.equal(status.wouldRefuse, 1);
   assert.equal(status.ambiguous, 0);
-  assert.deepEqual(Object.keys(status).sort(), ["ambiguous", "days", "mode", "repeatDays", "wouldRefuse"]);
+  assert.equal(status.wouldRefuseClaim, 1);
+  assert.equal(status.wouldRefuseIngest, 0);
+  assert.deepEqual(Object.keys(status).sort(), [
+    "ambiguous", "days", "mode", "repeatDays", "wouldRefuse", "wouldRefuseClaim", "wouldRefuseIngest"
+  ]);
   assert.equal(logs.filter((entry) => entry.payload.event === "maintainer_repo_cooldown_would_refuse").length, 1);
   assert.equal(logs.some((entry) => JSON.stringify(entry).includes(WALLET)), false);
   assert.equal(logs.some((entry) => JSON.stringify(entry).includes("old/name")), false);
@@ -337,6 +382,8 @@ test("a failed counter read is not reported as zero", async () => {
     getServiceState: async () => { throw new Error("store down"); }
   });
   assert.equal(status.wouldRefuse, "not reported");
+  assert.equal(status.wouldRefuseClaim, "not reported");
+  assert.equal(status.wouldRefuseIngest, "not reported");
   assert.equal(status.ambiguous, "not reported");
 });
 
@@ -356,7 +403,8 @@ test("verifier preview does not start a cooldown, and a maintainer close observe
     jobId: "pr",
     status: "submitted",
     wallet: WALLET,
-    submittedAt: NOW.toISOString(),
+    claimedAt: CLAIMED_AT,
+    submittedAt: CLAIMED_AT,
     jobSnapshot: buildJobSnapshot(job),
     submission: normalizeSubmission({
       prUrl: "https://github.com/old/name/pull/9",
@@ -375,6 +423,11 @@ test("verifier preview does not start a cooldown, and a maintainer close observe
   const record = await getMaintainerRepoCooldown(stateStore, REPO_ID);
   assert.equal(record.cooldownReason, "maintainer_close");
   assert.equal(record.repoId, REPO_ID);
+  assert.equal(record.cooldownUntil, new Date(Date.parse(CLOSED_AT) + 7 * DAY).toISOString());
+  assert.equal(record.fullName, "new/name");
+  assert.equal(record.author, undefined);
+  assert.equal(record.closedBy, undefined);
+  assert.equal(JSON.stringify(record).includes("worker"), false);
   assert.equal(await stateStore.getServiceState(maintainerRepoCooldownScope(REPO_ID)).then((row) => row.cooldownReason), "maintainer_close");
 
   const openStore = new MemoryStateStore();
@@ -394,4 +447,215 @@ test("verifier preview does not start a cooldown, and a maintainer close observe
   );
   await assert.rejects(() => openVerifier.verifySubmission({ sessionId: "pr" }));
   assert.equal(await getMaintainerRepoCooldown(openStore, REPO_ID), null);
+});
+
+test("a close counts only for a matched footer, a later maintainer close, and the pull request's own repository", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = githubJob({ id: "bound", repo: "old/name" });
+  const observedAt = new Date("2026-10-20T00:00:00.000Z");
+  const cases = [
+    ["claimant_unbound", closedLookup({ binding: "missing" })],
+    ["closed_at_unreported", closedLookup({ closedAt: null })],
+    ["closed_before_claim", closedLookup({ closedAt: "2026-09-01T00:00:00.000Z" })],
+    ["closed_by_unreported", closedLookup({ closedBy: null })],
+    ["closed_by_author", closedLookup({ author: "worker", closedBy: "worker" })],
+    ["pull_request_merged", closedLookup({ merged: true })],
+    ["repo_id_conflict", closedLookup({ repoId: 999 })]
+  ];
+  for (const [reason, lookup] of cases) {
+    const result = await observeMaintainerPullRequest({
+      stateStore,
+      lookup,
+      job,
+      claimedAt: CLAIMED_AT,
+      now: observedAt
+    });
+    assert.equal(result.reason, reason, reason);
+    assert.notEqual(result.status, "recorded", reason);
+  }
+  assert.equal(await getMaintainerRepoCooldown(stateStore, REPO_ID), null);
+  assert.equal(await getMaintainerRepoCooldown(stateStore, 999), null);
+
+  const recorded = await observeMaintainerPullRequest({
+    stateStore,
+    lookup: closedLookup(),
+    job,
+    claimedAt: CLAIMED_AT,
+    now: observedAt
+  });
+  assert.equal(recorded.status, "recorded");
+  assert.equal(recorded.record.cooldownUntil, new Date(Date.parse(CLOSED_AT) + 7 * DAY).toISOString());
+  assert.equal(recorded.record.fullName, "new/name");
+  assert.notEqual(recorded.record.cooldownUntil, new Date(observedAt.getTime() + 7 * DAY).toISOString());
+});
+
+test("the same pull request re-observed on days 0, 31 and 62 counts once and never extends", async () => {
+  const stateStore = new MemoryStateStore();
+  const config = { days: 7, repeatDays: 30 };
+  const first = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 9, closedAt: NOW, now: NOW, config
+  });
+  const until = first.record.cooldownUntil;
+  assert.equal(until, new Date(NOW.getTime() + 7 * DAY).toISOString());
+  for (const day of [31, 62]) {
+    const again = await recordMaintainerClose({
+      stateStore,
+      repoId: REPO_ID,
+      pullNumber: 9,
+      closedAt: NOW,
+      now: new Date(NOW.getTime() + day * DAY),
+      config
+    });
+    assert.equal(again.record.cooldownUntil, until);
+    assert.equal(again.record.closeCount30d, 1);
+  }
+  const stored = await getMaintainerRepoCooldown(stateStore, REPO_ID);
+  assert.deepEqual(stored.countedPullKeys, [`${REPO_ID}#9`]);
+});
+
+test("cooldown expiry is inactive at the exact end and the 30 day window excludes an exact boundary", async () => {
+  const until = new Date(NOW.getTime() + 7 * DAY).toISOString();
+  assert.equal(readCooldownDecision({ cooldownUntil: until, cooldownReason: "maintainer_close" }, new Date(until)).active, false);
+  assert.equal(readCooldownDecision({
+    cooldownUntil: until,
+    cooldownReason: "maintainer_close"
+  }, new Date(Date.parse(until) - 1)).active, true);
+
+  const stateStore = new MemoryStateStore();
+  const config = { days: 7, repeatDays: 30 };
+  await recordMaintainerClose({ stateStore, repoId: REPO_ID, pullNumber: 1, closedAt: NOW, now: NOW, config });
+  const exact = await recordMaintainerClose({
+    stateStore,
+    repoId: REPO_ID,
+    pullNumber: 2,
+    closedAt: new Date(NOW.getTime() + 30 * DAY),
+    now: new Date(NOW.getTime() + 30 * DAY),
+    config
+  });
+  assert.equal(exact.record.closeCount30d, 1);
+  assert.equal(exact.record.cooldownReason, "maintainer_close");
+  const inside = await recordMaintainerClose({
+    stateStore,
+    repoId: REPO_ID,
+    pullNumber: 3,
+    closedAt: new Date(NOW.getTime() + 30 * DAY - 1),
+    now: new Date(NOW.getTime() + 30 * DAY - 1),
+    config
+  });
+  assert.equal(inside.record.closeCount30d, 2);
+  assert.equal(inside.record.cooldownReason, "maintainer_close_repeat");
+});
+
+test("a contended cooldown lock is retried and then logged instead of dropping the close silently", async () => {
+  const logs = [];
+  const logger = { warn(payload, message) { logs.push({ payload, message }); } };
+  let attempts = 0;
+  const blocking = {
+    async acquireClaimLock() {
+      attempts += 1;
+      return false;
+    },
+    async releaseClaimLock() {},
+    async getServiceState() { throw new Error("should not read"); },
+    async upsertServiceState() { throw new Error("should not write"); }
+  };
+  const blocked = await recordMaintainerClose({
+    stateStore: blocking, repoId: REPO_ID, pullNumber: 4, now: NOW, logger
+  });
+  assert.equal(blocked.status, "contended");
+  assert.ok(attempts > 1);
+  assert.equal(logs.at(-1).payload.event, "maintainer_repo_cooldown_lock_contended");
+  assert.equal(logs.at(-1).payload.repoId, REPO_ID);
+
+  const stateStore = new MemoryStateStore();
+  let claims = 0;
+  const original = stateStore.acquireClaimLock.bind(stateStore);
+  stateStore.acquireClaimLock = async (...args) => {
+    claims += 1;
+    if (claims < 3) return false;
+    return original(...args);
+  };
+  const recorded = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 4, now: NOW, config: { days: 7, repeatDays: 30 }
+  });
+  assert.equal(recorded.status, "recorded");
+  assert.equal(recorded.record.cooldownReason, "maintainer_close");
+});
+
+test("a failed cooldown read allows the claim and a failed counter write does not undo it", async () => {
+  const logs = [];
+  const stateStore = new MemoryStateStore();
+  await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 5, now: NOW, config: { days: 7, repeatDays: 30 }
+  });
+  const originalGet = stateStore.getServiceState.bind(stateStore);
+  const originalUpsert = stateStore.upsertServiceState.bind(stateStore);
+  stateStore.getServiceState = async (scope) => {
+    if (scope === `maintainer-repo-cooldown:${REPO_ID}`) throw new Error("cooldown read down");
+    return originalGet(scope);
+  };
+  const job = githubJob({ id: "read-fails" });
+  const reading = executionService([job], stateStore, {
+    repoCooldown: { mode: "enforce" },
+    logs
+  });
+  const allowed = await reading.claimJob(WALLET, job.id, "http", "read-fails");
+  assert.equal(allowed.status, "claimed");
+  assert.equal(logs.some((entry) => entry.payload.event === "maintainer_repo_cooldown_read_failed"), true);
+
+  stateStore.getServiceState = originalGet;
+  stateStore.upsertServiceState = async (scope, value) => {
+    if (scope === "maintainer-repo-cooldown-counters") throw new Error("counter down");
+    return originalUpsert(scope, value);
+  };
+  const unnamed = githubJob({ id: "ambiguous-counter", repoId: null });
+  const logging = executionService([unnamed], stateStore, { logs });
+  const claimed = await logging.claimJob(OTHER_WALLET, unnamed.id, "http", "ambiguous-counter");
+  assert.equal(claimed.status, "claimed");
+  assert.equal(logs.some((entry) => entry.payload.event === "maintainer_repo_cooldown_counter_persist_failed"), true);
+});
+
+test("the pull request lookup exposes closed_at, closed_by, and baseRepo.fullName", async () => {
+  const calls = [];
+  const verdict = await new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: async (url) => {
+      const path = new URL(url).pathname;
+      calls.push(path);
+      if (path.endsWith("/status")) return Response.json({ statuses: [] });
+      if (path.endsWith("/check-runs")) return Response.json({ check_runs: [] });
+      if (path.endsWith("/reviews")) return Response.json([]);
+      if (path === "/repos/new/name/issues/9") return Response.json({ closed_by: { login: "maintainer" } });
+      if (path === "/repos/new/name/pulls/9") {
+        return Response.json({
+          state: "closed",
+          merged: false,
+          closed_at: CLOSED_AT,
+          user: { login: "worker" },
+          title: "Fix #1",
+          body: "Closes #1",
+          html_url: "https://github.com/new/name/pull/9",
+          head: { sha: "abc" },
+          base: { repo: { id: REPO_ID, full_name: "new/name", created_at: "2020-01-01T00:00:00Z" } }
+        });
+      }
+      return new Response("{}", { status: 404 });
+    }
+  }).evaluate({
+    id: "lookup-job",
+    lifecycle: { createdAt: "2026-01-01T00:00:00.000Z" },
+    category: "coding",
+    verifierMode: "github_pr",
+    source: { type: "github_issue", repo: "old/name", issueNumber: 1, githubRepoId: REPO_ID },
+    verifierConfig: { handler: "github_pr", version: 1, minimumScore: 80, requireIssueReference: false, requireTestEvidence: false }
+  }, normalizeSubmission({
+    prUrl: "https://github.com/new/name/pull/9",
+    summary: "Fix issue #1",
+    tests: "ok"
+  }));
+  assert.equal(calls.includes("/repos/new/name/issues/9"), true);
+  assert.equal(verdict.githubLookup.closedAt, CLOSED_AT);
+  assert.equal(verdict.githubLookup.closedBy.login, "maintainer");
+  assert.equal(verdict.githubLookup.author.login, "worker");
+  assert.equal(verdict.githubLookup.baseRepo.fullName, "new/name");
 });

@@ -10,9 +10,12 @@ export const DEFAULT_MAINTAINER_REPO_COOLDOWN_REPEAT_DAYS = 30;
 export const MAINTAINER_REPO_CLOSE_WINDOW_DAYS = 30;
 export const MAINTAINER_REPO_COOLDOWN_COUNTER_SCOPE = "maintainer-repo-cooldown-counters";
 export const MAINTAINER_REPO_COOLDOWN_LOCK_TTL_SECONDS = 30;
+export const MAINTAINER_ASSOCIATIONS = Object.freeze(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CLOSE_WINDOW_MS = MAINTAINER_REPO_CLOSE_WINDOW_DAYS * DAY_MS;
+const LOCK_WAIT_MS = 400;
+const LOCK_POLL_MS = 40;
 
 export function maintainerRepoCooldownScope(repoId) {
   return `maintainer-repo-cooldown:${repoId}`;
@@ -33,6 +36,21 @@ function positivePullNumber(value) {
   return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
+function loginOf(value) {
+  const login = typeof value === "string" ? value : value?.login;
+  const normalized = typeof login === "string" ? login.trim().toLowerCase() : "";
+  return normalized || null;
+}
+
+function parseTime(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function isMaintainerAssociation(value) {
+  return MAINTAINER_ASSOCIATIONS.includes(String(value ?? "").trim().toUpperCase());
+}
+
 export function normalizeMaintainerRepoCooldownConfig(config = {}) {
   return {
     mode: config.mode === "enforce" ? "enforce" : DEFAULT_MAINTAINER_REPO_COOLDOWN_MODE,
@@ -49,7 +67,16 @@ export function loadMaintainerRepoCooldownConfig(env = process.env) {
   });
 }
 
-export function classifyMaintainerClose(lookup, job, { claimExpired = false, sessionStatus = undefined } = {}) {
+function repositoryFullName(lookup) {
+  return normalizeRepo(lookup?.baseRepo?.fullName) || normalizeRepo(lookup?.baseRepo?.full_name) || null;
+}
+
+export function classifyMaintainerClose(lookup, job, {
+  claimExpired = false,
+  sessionStatus = undefined,
+  claimedAt = undefined,
+  submittedAt = undefined
+} = {}) {
   if (claimExpired === true || sessionStatus === "expired") {
     return { kind: "ignore", reason: "expired_claim" };
   }
@@ -73,8 +100,28 @@ export function classifyMaintainerClose(lookup, job, { claimExpired = false, ses
   const repoId = lookupRepoId ?? jobRepoId;
   if (!repoId) return { kind: "ambiguous", reason: "repo_unattributed" };
 
-  const fullName = normalizeRepo(lookup.baseRepo?.full_name) || normalizeRepo(job?.source?.repo) || null;
-  return { kind: "close", repoId, pullNumber, fullName, key: `${repoId}#${pullNumber}` };
+  if (lookup.claimantBinding?.status !== "matched") {
+    return { kind: "ambiguous", reason: "claimant_unbound" };
+  }
+  const closedAtMs = parseTime(lookup.closedAt);
+  if (closedAtMs === null) return { kind: "ambiguous", reason: "closed_at_unreported" };
+  const anchorMs = parseTime(claimedAt) ?? parseTime(submittedAt);
+  if (anchorMs === null) return { kind: "ambiguous", reason: "claim_time_unreported" };
+  if (closedAtMs <= anchorMs) return { kind: "ambiguous", reason: "closed_before_claim" };
+
+  const author = loginOf(lookup.author);
+  const closedBy = loginOf(lookup.closedBy);
+  if (!author || !closedBy) return { kind: "ambiguous", reason: "closed_by_unreported" };
+  if (author === closedBy) return { kind: "ambiguous", reason: "closed_by_author" };
+
+  return {
+    kind: "close",
+    repoId,
+    pullNumber,
+    fullName: repositoryFullName(lookup),
+    key: `${repoId}#${pullNumber}`,
+    closedAt: new Date(closedAtMs).toISOString()
+  };
 }
 
 export function readCooldownDecision(record, now = new Date()) {
@@ -98,12 +145,28 @@ export function readCooldownDecision(record, now = new Date()) {
   };
 }
 
-function countedCloses(record, now) {
-  const closes = Array.isArray(record?.closes) ? record.closes : [];
+function storedCloses(record) {
+  return (Array.isArray(record?.closes) ? record.closes : []).filter((entry) => entry?.key);
+}
+
+function permanentPullKeys(record) {
+  const keys = new Set();
+  for (const key of record?.countedPullKeys ?? []) {
+    if (typeof key === "string" && key) keys.add(key);
+  }
+  for (const entry of storedCloses(record)) keys.add(entry.key);
+  return keys;
+}
+
+function closesInWindow(closes, closedAtMs) {
   return closes.filter((entry) => {
-    const at = Date.parse(entry?.at);
-    return entry?.key && Number.isFinite(at) && now.getTime() - at < CLOSE_WINDOW_MS;
+    const at = Date.parse(entry.at);
+    return Number.isFinite(at) && closedAtMs - at < CLOSE_WINDOW_MS && closedAtMs - at >= 0;
   });
+}
+
+function countedCloses(record, now) {
+  return closesInWindow(storedCloses(record), now.getTime());
 }
 
 function publicRecord(record) {
@@ -118,13 +181,21 @@ function publicRecord(record) {
   };
 }
 
-async function withCooldownLock(stateStore, repoId, fn) {
+async function withCooldownLock(stateStore, repoId, fn, logger) {
   const lockId = maintainerRepoCooldownLockId(repoId);
   const owner = randomUUID();
   const acquired = await acquireMaintainerRepoClaimLock(stateStore, lockId, owner, {
-    ttlSeconds: MAINTAINER_REPO_COOLDOWN_LOCK_TTL_SECONDS
+    ttlSeconds: MAINTAINER_REPO_COOLDOWN_LOCK_TTL_SECONDS,
+    waitMs: LOCK_WAIT_MS,
+    pollMs: LOCK_POLL_MS
   });
-  if (!acquired) return { status: "contended" };
+  if (!acquired) {
+    logger?.warn?.({
+      event: "maintainer_repo_cooldown_lock_contended",
+      repoId
+    }, "maintainer_repo_cooldown_lock_contended");
+    return { status: "contended" };
+  }
   try {
     return await fn();
   } finally {
@@ -139,43 +210,41 @@ export async function getMaintainerRepoCooldown(stateStore, repoId) {
   return stored ?? null;
 }
 
-function nextCloseRecord(record, { repoId, fullName, key, now, config }) {
-  const closes = countedCloses(record, now);
-  const already = closes.some((entry) => entry.key === key);
-  const nextCloses = already ? closes : [...closes, { key, at: now.toISOString() }];
-  const closeCount30d = nextCloses.length;
+function nextCloseRecord(record, { repoId, fullName, key, closedAt, config }) {
+  const permanent = permanentPullKeys(record);
   const resolvedName = fullName || record?.fullName || null;
-  if (record?.cooldownUntil === "indefinite") {
+  if (permanent.has(key)) {
     return {
       ...record,
       repoId,
       fullName: resolvedName,
-      cooldownUntil: "indefinite",
-      cooldownReason: "maintainer_stop_signal",
-      lastMaintainerCloseAt: already ? record.lastMaintainerCloseAt : now.toISOString(),
-      closeCount30d,
-      closes: nextCloses
+      countedPullKeys: [...permanent]
     };
   }
-  if (already) {
+  const closes = [...storedCloses(record), { key, at: closedAt.toISOString() }];
+  permanent.add(key);
+  const closeCount30d = closesInWindow(closes, closedAt.getTime()).length;
+  const shared = {
+    ...record,
+    repoId,
+    fullName: resolvedName,
+    lastMaintainerCloseAt: closedAt.toISOString(),
+    closeCount30d,
+    closes,
+    countedPullKeys: [...permanent]
+  };
+  if (record?.cooldownUntil === "indefinite") {
     return {
-      ...record,
-      repoId,
-      fullName: resolvedName,
-      closeCount30d,
-      closes: nextCloses
+      ...shared,
+      cooldownUntil: "indefinite",
+      cooldownReason: "maintainer_stop_signal"
     };
   }
   const repeat = closeCount30d >= 2;
   return {
-    ...record,
-    repoId,
-    fullName: resolvedName,
-    cooldownUntil: new Date(now.getTime() + (repeat ? config.repeatDays : config.days) * DAY_MS).toISOString(),
-    cooldownReason: repeat ? "maintainer_close_repeat" : "maintainer_close",
-    lastMaintainerCloseAt: now.toISOString(),
-    closeCount30d,
-    closes: nextCloses
+    ...shared,
+    cooldownUntil: new Date(closedAt.getTime() + (repeat ? config.repeatDays : config.days) * DAY_MS).toISOString(),
+    cooldownReason: repeat ? "maintainer_close_repeat" : "maintainer_close"
   };
 }
 
@@ -186,11 +255,14 @@ export async function recordMaintainerClose({
   pullNumber,
   key,
   now = new Date(),
-  config
+  closedAt = undefined,
+  config,
+  logger
 } = {}) {
   const id = positiveGithubRepoId(repoId);
   const prKey = key ?? (id && positivePullNumber(pullNumber) ? `${id}#${pullNumber}` : null);
-  if (!id || !prKey || typeof stateStore?.upsertServiceState !== "function") {
+  const at = new Date(closedAt ?? now);
+  if (!id || !prKey || !Number.isFinite(at.getTime()) || typeof stateStore?.upsertServiceState !== "function") {
     return { status: "ambiguous", reason: "repo_unattributed" };
   }
   const resolved = normalizeMaintainerRepoCooldownConfig(config ?? loadMaintainerRepoCooldownConfig(process.env));
@@ -200,27 +272,44 @@ export async function recordMaintainerClose({
       repoId: id,
       fullName: normalizeRepo(fullName) || null,
       key: prKey,
-      now,
+      closedAt: at,
       config: resolved
     });
     const saved = await stateStore.upsertServiceState(maintainerRepoCooldownScope(id), next);
     return { status: "recorded", record: publicRecord(saved) };
-  });
+  }, logger);
+}
+
+function acknowledgedSources(record) {
+  return new Set((record?.acknowledgedStopSources ?? []).filter((source) => typeof source === "string" && source));
+}
+
+function knownStopSources(record) {
+  return new Set((record?.stopSources ?? []).filter((source) => typeof source === "string" && source));
 }
 
 export async function recordMaintainerStopSignal({
   stateStore,
   repoId,
   fullName = null,
-  now = new Date()
+  source,
+  now = new Date(),
+  logger
 } = {}) {
   const id = positiveGithubRepoId(repoId);
-  if (!id || typeof stateStore?.upsertServiceState !== "function") {
-    return { status: "ambiguous", reason: "repo_unattributed" };
+  const signalSource = typeof source === "string" ? source.trim() : "";
+  if (!id || !signalSource || typeof stateStore?.upsertServiceState !== "function") {
+    return { status: "ambiguous", reason: "stop_source_missing" };
   }
   return withCooldownLock(stateStore, id, async () => {
     const existing = await stateStore.getServiceState(maintainerRepoCooldownScope(id));
-    const closes = countedCloses(existing, now);
+    const acknowledged = acknowledgedSources(existing);
+    if (acknowledged.has(signalSource)) {
+      return { status: "ignored", reason: "stop_source_acknowledged", record: publicRecord(existing) };
+    }
+    const sources = knownStopSources(existing);
+    sources.add(signalSource);
+    const closes = storedCloses(existing);
     const next = {
       ...existing,
       repoId: id,
@@ -228,12 +317,15 @@ export async function recordMaintainerStopSignal({
       cooldownUntil: "indefinite",
       cooldownReason: "maintainer_stop_signal",
       lastMaintainerCloseAt: existing?.lastMaintainerCloseAt ?? null,
-      closeCount30d: closes.length,
-      closes
+      closeCount30d: closesInWindow(closes, now.getTime()).length,
+      closes,
+      countedPullKeys: [...permanentPullKeys(existing)],
+      stopSources: [...sources],
+      acknowledgedStopSources: [...acknowledged]
     };
     const saved = await stateStore.upsertServiceState(maintainerRepoCooldownScope(id), next);
     return { status: "recorded", record: publicRecord(saved) };
-  });
+  }, logger);
 }
 
 export async function clearMaintainerRepoCooldown({
@@ -264,21 +356,32 @@ export async function clearMaintainerRepoCooldown({
         { repoId: id }
       );
     }
-    const closes = countedCloses(existing, now);
+    const acknowledged = acknowledgedSources(existing);
+    for (const source of knownStopSources(existing)) acknowledged.add(source);
+    const closes = storedCloses(existing);
     const next = {
       ...existing,
       repoId: id,
       cooldownUntil: null,
       cooldownReason: null,
-      closeCount30d: closes.length,
+      closeCount30d: closesInWindow(closes, now.getTime()).length,
       closes,
+      countedPullKeys: [...permanentPullKeys(existing)],
+      stopSources: [...knownStopSources(existing)],
+      acknowledgedStopSources: [...acknowledged],
       clearedAt: now.toISOString(),
       clearedBy: actorId,
       clearReason
     };
     await stateStore.upsertServiceState(maintainerRepoCooldownScope(id), next);
-    return { repoId: id, cleared: true, cooldownUntil: null, cooldownReason: null, closeCount30d: closes.length };
-  });
+    return {
+      repoId: id,
+      cleared: true,
+      cooldownUntil: null,
+      cooldownReason: null,
+      closeCount30d: next.closeCount30d
+    };
+  }, logger);
   if (result?.status === "contended") {
     throw new ValidationError("Another update of this repository cooldown is in progress.");
   }
@@ -296,18 +399,32 @@ export async function observeMaintainerPullRequest({
   lookup,
   job,
   sessionStatus,
+  claimedAt,
+  submittedAt,
   claimExpired = false,
   now = new Date(),
   config,
   logger
 } = {}) {
-  const classified = classifyMaintainerClose(lookup, job, { claimExpired, sessionStatus });
+  const classified = classifyMaintainerClose(lookup, job, {
+    claimExpired,
+    sessionStatus,
+    claimedAt,
+    submittedAt
+  });
   if (classified.kind === "ignore") return { status: "ignored", reason: classified.reason };
   if (classified.kind === "ambiguous") {
-    await incrementMaintainerRepoCooldownCounter(stateStore, "ambiguous", logger, {
-      event: "maintainer_repo_cooldown_ambiguous",
-      reason: classified.reason
-    });
+    try {
+      await incrementMaintainerRepoCooldownCounter(stateStore, "ambiguous", logger, {
+        event: "maintainer_repo_cooldown_ambiguous",
+        reason: classified.reason
+      });
+    } catch {
+      logger?.warn?.({
+        event: "maintainer_repo_cooldown_counter_persist_failed",
+        reason: classified.reason
+      }, "maintainer_repo_cooldown_counter_persist_failed");
+    }
     return { status: "ambiguous", reason: classified.reason };
   }
   return recordMaintainerClose({
@@ -317,7 +434,9 @@ export async function observeMaintainerPullRequest({
     pullNumber: classified.pullNumber,
     key: classified.key,
     now,
-    config
+    closedAt: classified.closedAt,
+    config,
+    logger
   });
 }
 
@@ -325,19 +444,34 @@ function measuredCount(value) {
   return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
+function counterSnapshot(stored) {
+  const wouldRefuseClaim = measuredCount(stored?.wouldRefuseClaim);
+  const wouldRefuseIngest = measuredCount(stored?.wouldRefuseIngest);
+  const wouldRefuse = Number.isInteger(stored?.wouldRefuse) && stored.wouldRefuse >= 0
+    ? stored.wouldRefuse
+    : wouldRefuseClaim + wouldRefuseIngest;
+  return {
+    wouldRefuse,
+    wouldRefuseClaim,
+    wouldRefuseIngest,
+    ambiguous: measuredCount(stored?.ambiguous)
+  };
+}
+
 export async function readMaintainerRepoCooldownCounters(stateStore) {
-  if (typeof stateStore?.getServiceState !== "function") {
-    return { wouldRefuse: "not reported", ambiguous: "not reported" };
-  }
+  const unmeasured = {
+    wouldRefuse: "not reported",
+    wouldRefuseClaim: "not reported",
+    wouldRefuseIngest: "not reported",
+    ambiguous: "not reported"
+  };
+  if (typeof stateStore?.getServiceState !== "function") return unmeasured;
   try {
     const stored = await stateStore.getServiceState(MAINTAINER_REPO_COOLDOWN_COUNTER_SCOPE);
-    if (!stored) return { wouldRefuse: 0, ambiguous: 0 };
-    return {
-      wouldRefuse: measuredCount(stored.wouldRefuse),
-      ambiguous: measuredCount(stored.ambiguous)
-    };
+    if (!stored) return { wouldRefuse: 0, wouldRefuseClaim: 0, wouldRefuseIngest: 0, ambiguous: 0 };
+    return counterSnapshot(stored);
   } catch {
-    return { wouldRefuse: "not reported", ambiguous: "not reported" };
+    return unmeasured;
   }
 }
 
@@ -346,6 +480,7 @@ export async function incrementMaintainerRepoCooldownCounter(stateStore, field, 
   if (typeof stateStore?.getServiceState !== "function" || typeof stateStore?.upsertServiceState !== "function") {
     return null;
   }
+  const surface = details.surface === "ingest" ? "ingest" : details.surface === "claim" ? "claim" : null;
   const lockId = MAINTAINER_REPO_COOLDOWN_COUNTER_SCOPE;
   const owner = randomUUID();
   const acquired = await acquireMaintainerRepoClaimLock(stateStore, lockId, owner, {
@@ -354,15 +489,24 @@ export async function incrementMaintainerRepoCooldownCounter(stateStore, field, 
   if (!acquired) return null;
   try {
     const stored = await stateStore.getServiceState(MAINTAINER_REPO_COOLDOWN_COUNTER_SCOPE);
-    const next = {
-      wouldRefuse: measuredCount(stored?.wouldRefuse),
-      ambiguous: measuredCount(stored?.ambiguous)
-    };
-    next[field] += 1;
+    const next = counterSnapshot(stored);
+    if (field === "wouldRefuse") {
+      next.wouldRefuse += 1;
+      if (surface === "claim") next.wouldRefuseClaim += 1;
+      if (surface === "ingest") next.wouldRefuseIngest += 1;
+    } else {
+      next.ambiguous += 1;
+    }
     await stateStore.upsertServiceState(MAINTAINER_REPO_COOLDOWN_COUNTER_SCOPE, next);
     logger?.info?.({
-      ...details,
+      event: details.event ?? "maintainer_repo_cooldown_counter",
+      surface: surface ?? undefined,
+      reason: details.reason,
+      repoId: details.repoId,
+      cooldownUntil: details.cooldownUntil,
       wouldRefuse: next.wouldRefuse,
+      wouldRefuseClaim: next.wouldRefuseClaim,
+      wouldRefuseIngest: next.wouldRefuseIngest,
       ambiguous: next.ambiguous
     }, details.event ?? "maintainer_repo_cooldown_counter");
     return next;

@@ -6,8 +6,10 @@ import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   evaluateMaintainerSurfaceForIssue,
   normalizeRepo,
-  repoFromIssue
+  repoFromIssue,
+  scanPolicyText
 } from "../core/maintainer-surface-policy.js";
+import { isMaintainerAssociation } from "../core/maintainer-repo-cooldown.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
@@ -81,11 +83,14 @@ export async function ingestGithubIssues({
     fetchImpl
   });
   const scored = await Promise.all(issues.map(async (issue) => {
-    const policy = await evaluateMaintainerSurfaceForIssue(issue, {
+    let policy = await evaluateMaintainerSurfaceForIssue(issue, {
       githubToken,
       fetchImpl,
       ...maintainerPolicy
     });
+    if (policy.allowed && maintainerCommentSources(issue).length > 0) {
+      policy = { ...policy, allowed: false, reason: "maintainer_stop_signal" };
+    }
     return { issue, score: scoreIssue(issue), policy };
   }));
   const skippedRows = scored.filter(({ score, policy }) => score < minScore || !policy.allowed);
@@ -105,6 +110,9 @@ export async function ingestGithubIssues({
     };
     if (detail.reason === "maintainer_stop_signal") {
       detail.repoId = stopRepoIds.get(normalizeRepo(repo)) ?? null;
+      const stopSources = maintainerStopSources(issue, policy);
+      detail.stopSources = stopSources;
+      detail.escalates = stopSources.length > 0;
     }
     return detail;
   });
@@ -332,6 +340,34 @@ async function lookupGithubRepositoryId(repo, { githubToken, fetchImpl }) {
   } catch {
     return null;
   }
+}
+
+export function maintainerStopSources(issue, policy) {
+  const sources = [];
+  for (const match of policy?.policyScan?.matches ?? []) {
+    if (match?.reason === "maintainer_stop_signal" && typeof match.path === "string" && match.path.trim()) {
+      sources.push(`policy:${match.path.trim()}`);
+    }
+  }
+  if (policy?.issueBodyHit === true && policy?.reason === "maintainer_stop_signal"
+    && isMaintainerAssociation(issue?.author_association)) {
+    const issueNumber = Number(issue?.number);
+    if (Number.isInteger(issueNumber) && issueNumber > 0) sources.push(`issue:${issueNumber}`);
+  }
+  sources.push(...maintainerCommentSources(issue));
+  return [...new Set(sources)];
+}
+
+function maintainerCommentSources(issue) {
+  if (!Array.isArray(issue?.comments)) return [];
+  const sources = [];
+  for (const comment of issue.comments) {
+    if (!isMaintainerAssociation(comment?.author_association)) continue;
+    if (scanPolicyText(comment?.body).reason !== "maintainer_stop_signal") continue;
+    const commentId = Number(comment?.id);
+    if (Number.isInteger(commentId) && commentId > 0) sources.push(`comment:${commentId}`);
+  }
+  return sources;
 }
 
 function positiveRepoId(value) {

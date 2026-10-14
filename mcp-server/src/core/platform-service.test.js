@@ -2293,6 +2293,8 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   });
   assert.equal(status.ops.maintainerRepoCooldown.mode, "log");
   assert.equal(status.ops.maintainerRepoCooldown.wouldRefuse, 0);
+  assert.equal(status.ops.maintainerRepoCooldown.wouldRefuseClaim, 0);
+  assert.equal(status.ops.maintainerRepoCooldown.wouldRefuseIngest, 0);
   assert.equal(status.ops.maintainerRepoCooldown.ambiguous, 0);
   assert.equal(status.ops.maintainerRepoCooldown.days, service.jobExecutionService.repoCooldown.days);
   assert.equal(status.ops.maintainerRepoCooldown.repeatDays, service.jobExecutionService.repoCooldown.repeatDays);

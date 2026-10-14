@@ -490,8 +490,12 @@ test("a closed unmerged review observation starts a 7 day cooldown and a repeat 
     state: "closed",
     merged: false,
     pullNumber: 9,
+    closedAt: "2026-10-01T00:00:00.000Z",
+    author: { login: "worker" },
+    closedBy: { login: "maintainer" },
+    claimantBinding: { status: "matched" },
     headSha: "closed-head",
-    baseRepo: { id: 424242, full_name: "old/name" },
+    baseRepo: { id: 424242, fullName: "new/name" },
     partial: { status: "available", checkRuns: "available", reviews: "available" }
   };
   const review = new GithubPrReviewService({
@@ -505,7 +509,8 @@ test("a closed unmerged review observation starts a 7 day cooldown and a repeat 
   await review.runOnce(now);
   const record = await store.getServiceState("maintainer-repo-cooldown:424242");
   assert.equal(record.cooldownReason, "maintainer_close");
-  assert.equal(record.cooldownUntil, "2026-10-21T00:00:00.000Z");
+  assert.equal(record.cooldownUntil, "2026-10-08T00:00:00.000Z");
+  assert.equal(record.fullName, "new/name");
   assert.equal(record.closeCount30d, 1);
   lookup.headSha = "still-closed";
   await review.runOnce(new Date(now.getTime() + 24 * 60 * 60 * 1000));
