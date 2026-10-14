@@ -4,12 +4,21 @@ import { boundGithubAuthor } from "./github-author-visibility.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
 import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
+import {
+  loadMaintainerRepoCooldownConfig,
+  normalizeMaintainerRepoCooldownConfig,
+  observeMaintainerPullRequest
+} from "../core/maintainer-repo-cooldown.js";
 
 export class GithubPrReviewService {
   constructor({ stateStore, verifierService, githubToken = process.env.GITHUB_TOKEN,
     slaHours = positive(process.env.GITHUB_PR_REVIEW_SLA_HOURS, 48),
-    intervalMs = positive(process.env.GITHUB_PR_REVIEW_POLL_MINUTES, 30) * 60_000, logger = console }) {
+    intervalMs = positive(process.env.GITHUB_PR_REVIEW_POLL_MINUTES, 30) * 60_000, logger = console,
+    repoCooldown = undefined }) {
     Object.assign(this, { stateStore, verifierService, slaHours, intervalMs, logger });
+    this.repoCooldown = normalizeMaintainerRepoCooldownConfig(
+      repoCooldown ?? loadMaintainerRepoCooldownConfig(process.env)
+    );
     this.enabled = Boolean(githubToken?.trim());
     this.githubUpstream = { ok: false, lastSuccessAt: null,
       lastError: this.enabled ? "github_not_checked" : "github_token_unconfigured" };
@@ -124,6 +133,11 @@ export class GithubPrReviewService {
             ? "preview_error" : "upstream_unavailable:" + (unavailable.join(",") || publicGithubError(upstream)) });
           continue;
         }
+        try {
+          await this.observeMaintainerCooldown(item, upstream, now);
+        } catch (error) {
+          summary.errors.push({ sessionId: item.sessionId, ...runError(error, "maintainer_repo_cooldown_observe_failed") });
+        }
         if (boundGithubAuthor(upstream)) {
           await this.stateStore.upsertMutationReceipt("github_pr_author", item.sessionId, {
             githubLookup: { status: upstream.status, author: upstream.author,
@@ -173,6 +187,25 @@ export class GithubPrReviewService {
       }
     }
     return summary;
+  }
+
+  async observeMaintainerCooldown(item, upstream, now) {
+    const session = await this.stateStore.getSession(item.sessionId);
+    let job;
+    try {
+      ({ job } = requireJobSnapshot(session));
+    } catch {
+      job = undefined;
+    }
+    await observeMaintainerPullRequest({
+      stateStore: this.stateStore,
+      lookup: upstream,
+      job,
+      sessionStatus: session?.status,
+      now,
+      config: this.repoCooldown,
+      logger: this.logger
+    });
   }
 
   async loadRunHistory() {

@@ -5,6 +5,10 @@ import { requireJobSnapshot } from "./job-snapshot.js";
 import { githubPrWorkerDefinition, isGithubPrJob } from "./github-pr-worker-contract.js";
 import { buildAverrayDisclosureFooter, buildAverrayDisclosureRequirement, inspectAverrayClaimantBinding } from "./maintainer-surface-policy.js";
 import { loadMaintainerRepoClaimCapConfig } from "./maintainer-repo-claim-cap.js";
+import {
+  clearMaintainerRepoCooldown,
+  loadMaintainerRepoCooldownConfig
+} from "./maintainer-repo-cooldown.js";
 import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
@@ -188,7 +192,8 @@ export class PlatformService {
         workerDailyExposurePolicy: this.workerDailyExposurePolicy,
         catalogueDailyBudget: this.catalogueDailyBudget,
         depositClaimPriorityPolicy: this.depositClaimPriorityPolicy,
-        repoClaimCap: loadMaintainerRepoClaimCapConfig(process.env)
+        repoClaimCap: loadMaintainerRepoClaimCapConfig(process.env),
+        repoCooldown: loadMaintainerRepoCooldownConfig(process.env)
       }
     );
     this.verificationIngestionService = new VerificationIngestionService(
@@ -1081,6 +1086,7 @@ export class PlatformService {
       lastRunAt: status.lastRun?.startedAt ?? null
     }]));
     const maintainerRepoClaimCap = await this.jobExecutionService.getMaintainerRepoClaimCapStatus();
+    const maintainerRepoCooldown = await this.jobExecutionService.getMaintainerRepoCooldownStatus();
 
     return {
       auth: auth
@@ -1117,7 +1123,8 @@ export class PlatformService {
         resolvedRecently: recentSessions.filter((session) => session.status === "resolved").length,
         firstWithdrawalGasGrants,
         topJobs,
-        maintainerRepoClaimCap
+        maintainerRepoClaimCap,
+        maintainerRepoCooldown
       },
       maintenance: {
         policy,
@@ -2251,6 +2258,17 @@ export class PlatformService {
       throw new ValidationError("Bank v2.2 runtime is disabled; dispatch is unavailable.");
     }
     return this.bankXcmDispatcher.dispatch({ requestId, leg });
+  }
+
+  async clearMaintainerRepoCooldown({ repoId, actor, reason, now } = {}) {
+    return clearMaintainerRepoCooldown({
+      stateStore: this.stateStore,
+      repoId,
+      actor,
+      reason,
+      now,
+      logger: this.logger
+    });
   }
 
   async ingestVerification(sessionId, verdict, options = undefined) {

@@ -21,6 +21,7 @@ import {
 import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
+import { createAdminMaintainerCooldownRoutes } from "./admin-maintainer-cooldown-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminArrivalAlertRoutes } from "./admin-arrival-alert-routes.js";
 import { createAdminArrivalSessionRoutes } from "./admin-arrival-session-routes.js";
@@ -609,6 +610,13 @@ const handleAdminCapabilityRoute = createAdminCapabilityRoutes({
 const handleAdminGithubRoute = createAdminGithubRoutes({
   authMiddleware,
   parseLimit,
+  respond,
+  service,
+});
+
+const handleAdminMaintainerCooldownRoute = createAdminMaintainerCooldownRoutes({
+  authMiddleware,
+  readJsonBody,
   respond,
   service,
 });
@@ -1342,6 +1350,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminGithubRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminMaintainerCooldownRoute({ request, response, url, pathname })) {
       return;
     }
 

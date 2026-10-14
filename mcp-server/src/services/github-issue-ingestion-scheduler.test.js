@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CatalogueLaneDiscipline, DEFAULT_CATALOGUE_LANE_REGISTRY, loadCatalogueLaneRegistry } from "../core/catalogue-lane-discipline.js";
 import { MemoryStateStore } from "../core/state-store.js";
+import {
+  getMaintainerRepoCooldown,
+  readMaintainerRepoCooldownCounters,
+  recordMaintainerClose
+} from "../core/maintainer-repo-cooldown.js";
 import { PlatformService } from "../core/platform-service.js";
 import { createJobsFromImportResult } from "../protocols/http/admin-job-import-routes.js";
 import { resolveOnboardingInventoryHealth } from "../core/onboarding-inventory.js";
@@ -393,6 +398,110 @@ test("GithubIssueIngestionScheduler caps noisy queries within a run", async () =
   assert.equal(platform.listJobs().length, 4);
   assert.deepEqual(summary.queries.map((query) => query.created), [2, 2]);
   assert.deepEqual(summary.queries.map((query) => query.maxJobsPerQuery), [2, 2]);
+});
+
+test("ingestion skips a cooled-down repository in enforce mode and only records a would-skip in log mode", async () => {
+  const issue = {
+    ...ISSUE,
+    repository: { id: 424242, full_name: "example/project" }
+  };
+  const now = new Date("2026-10-14T00:00:00.000Z");
+  for (const mode of ["enforce", "log"]) {
+    const store = new MemoryStateStore();
+    await recordMaintainerClose({
+      stateStore: store,
+      repoId: 424242,
+      fullName: "example/project",
+      pullNumber: 8,
+      now,
+      config: { days: 7, repeatDays: 30 }
+    });
+    const platform = makePlatformService();
+    platform.stateStore = store;
+    const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+      enabled: true,
+      dryRun: false,
+      queries: ["is:issue is:open label:good-first-issue"],
+      minScore: 55,
+      fetchImpl: makeFetch([issue]),
+      repoCooldown: { mode, days: 7, repeatDays: 30 }
+    });
+    const summary = await scheduler.runOnce(now);
+    const skip = summary.queries[0].skipped.find((entry) => entry.reason === "maintainer_repo_cooldown");
+    assert.equal(skip.repoId, 424242);
+    assert.equal(skip.cooldownUntil, "2026-10-21T00:00:00.000Z");
+    assert.equal(JSON.stringify(skip).includes("example/project"), false);
+    if (mode === "enforce") {
+      assert.equal(summary.createdCount, 0);
+      assert.equal(platform.listJobs().length, 0);
+      assert.equal(skip.enforced, true);
+      assert.equal((await readMaintainerRepoCooldownCounters(store)).wouldRefuse, 0);
+    } else {
+      assert.equal(summary.createdCount, 1);
+      assert.equal(platform.listJobs().length, 1);
+      assert.equal(skip.wouldSkip, true);
+      assert.equal(skip.enforced, false);
+      assert.equal((await readMaintainerRepoCooldownCounters(store)).wouldRefuse, 1);
+    }
+  }
+});
+
+test("a maintainer stop signal sets an indefinite cooldown and the next issue from that id is skipped", async () => {
+  const store = new MemoryStateStore();
+  const platform = makePlatformService();
+  platform.stateStore = store;
+  const stop = {
+    ...ISSUE,
+    body: "Please stop submitting Averray pull requests.",
+    repository: { id: 424242, full_name: "example/project" }
+  };
+  const next = {
+    ...ISSUE,
+    number: 43,
+    html_url: "https://github.com/example/project/issues/43",
+    repository: { id: 424242, full_name: "example/project" }
+  };
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["is:issue is:open label:good-first-issue"],
+    minScore: 55,
+    maxJobsPerRun: 2,
+    maxJobsPerQuery: 2,
+    fetchImpl: makeFetch([stop, next]),
+    repoCooldown: { mode: "enforce" }
+  });
+  const summary = await scheduler.runOnce(new Date("2026-10-14T00:00:00.000Z"));
+  assert.equal(summary.createdCount, 0);
+  assert.equal(platform.listJobs().length, 0);
+  assert.equal(summary.queries[0].skipped.some((entry) => entry.reason === "maintainer_stop_signal"), true);
+  assert.equal(summary.queries[0].skipped.some((entry) => entry.reason === "maintainer_repo_cooldown"), true);
+  const record = await getMaintainerRepoCooldown(store, 424242);
+  assert.equal(record.cooldownUntil, "indefinite");
+  assert.equal(record.cooldownReason, "maintainer_stop_signal");
+  assert.equal(record.repoId, 424242);
+});
+
+test("a stop signal that cannot be tied to a repository id does not cool down a name", async () => {
+  const store = new MemoryStateStore();
+  const platform = makePlatformService();
+  platform.stateStore = store;
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["is:issue is:open label:good-first-issue"],
+    minScore: 55,
+    fetchImpl: makeFetch([{
+      ...ISSUE,
+      body: "Please stop submitting Averray pull requests."
+    }]),
+    repoCooldown: { mode: "enforce" }
+  });
+  const summary = await scheduler.runOnce(new Date("2026-10-14T00:00:00.000Z"));
+  assert.equal(summary.createdCount, 0);
+  assert.equal(await store.getServiceState("maintainer-repo-cooldown:example/project"), undefined);
+  assert.equal((await readMaintainerRepoCooldownCounters(store)).ambiguous, 1);
+  assert.equal((await readMaintainerRepoCooldownCounters(store)).wouldRefuse, 0);
 });
 
 test("loadGithubIssueIngestionConfig parses env knobs safely", () => {

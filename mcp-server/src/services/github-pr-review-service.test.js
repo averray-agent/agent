@@ -482,6 +482,62 @@ test("every other preview outcome is observation-only and leaves the session in 
   }
 });
 
+test("a closed unmerged review observation starts a 7 day cooldown and a repeat read does not extend it", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const lookup = {
+    status: "verified",
+    state: "closed",
+    merged: false,
+    pullNumber: 9,
+    headSha: "closed-head",
+    baseRepo: { id: 424242, full_name: "old/name" },
+    partial: { status: "available", checkRuns: "available", reviews: "available" }
+  };
+  const review = new GithubPrReviewService({
+    stateStore: store,
+    githubToken: "token",
+    logger: { info() {} },
+    repoCooldown: { mode: "log", days: 7, repeatDays: 30 },
+    verifierService: { previewSubmission: async () => ({ outcome: "rejected", githubLookup: lookup }) }
+  });
+  const now = new Date("2026-10-14T00:00:00.000Z");
+  await review.runOnce(now);
+  const record = await store.getServiceState("maintainer-repo-cooldown:424242");
+  assert.equal(record.cooldownReason, "maintainer_close");
+  assert.equal(record.cooldownUntil, "2026-10-21T00:00:00.000Z");
+  assert.equal(record.closeCount30d, 1);
+  lookup.headSha = "still-closed";
+  await review.runOnce(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const again = await store.getServiceState("maintainer-repo-cooldown:424242");
+  assert.equal(again.cooldownUntil, record.cooldownUntil);
+  assert.equal(again.closeCount30d, 1);
+});
+
+test("an open pull request rejection observed by the review poll starts no cooldown", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const review = new GithubPrReviewService({
+    stateStore: store,
+    githubToken: "token",
+    logger: { info() {} },
+    verifierService: {
+      previewSubmission: async () => ({
+        outcome: "rejected",
+        githubLookup: {
+          status: "verified",
+          state: "open",
+          merged: false,
+          pullNumber: 9,
+          baseRepo: { id: 424242, full_name: "old/name" }
+        }
+      })
+    }
+  });
+  await review.runOnce(new Date("2026-10-14T00:00:00.000Z"));
+  assert.equal(await store.getServiceState("maintainer-repo-cooldown:424242"), undefined);
+});
+
 test("admin run authenticates as admin and persists the same handler verdict as verifier run; preview remains read-only", async () => {
   const outcomes = [];
   for (const pathname of ["/admin/verifier/run", "/verifier/run"]) {

@@ -47,6 +47,13 @@ import {
   normalizeMaintainerRepoClaimCapConfig,
   resolveJobRepoIdentity
 } from "./maintainer-repo-claim-cap.js";
+import {
+  getMaintainerRepoCooldown,
+  incrementMaintainerRepoCooldownCounter,
+  normalizeMaintainerRepoCooldownConfig,
+  readCooldownDecision,
+  readMaintainerRepoCooldownCounters
+} from "./maintainer-repo-cooldown.js";
 import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
 import { buildBadgeJobSnapshot } from "./badge-metadata.js";
 import {
@@ -126,6 +133,7 @@ export class JobExecutionService {
       ? maintainerSurfaceConfig.openPrCap
       : DEFAULT_OPEN_PR_CAP_PER_REPO;
     this.repoClaimCap = normalizeMaintainerRepoClaimCapConfig(maintainerSurfaceConfig.repoClaimCap);
+    this.repoCooldown = normalizeMaintainerRepoCooldownConfig(maintainerSurfaceConfig.repoCooldown);
     this.repoClaimCapWouldRefuse = 0;
     this.repoClaimCapAmbiguous = 0;
     this.repoClaimCapHydrated = false;
@@ -169,6 +177,7 @@ export class JobExecutionService {
     if (identity.status !== "known") {
       const claimed = await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
       await this.noteMaintainerRepoClaimCapAmbiguous(identity.repo);
+      await this.noteMaintainerRepoCooldownAmbiguous("repo_unattributed");
       return claimed;
     }
 
@@ -204,6 +213,19 @@ export class JobExecutionService {
       }
     }
 
+    const cooldown = await this.readActiveRepoCooldown(identity.repoId);
+    if (cooldown.active && this.repoCooldown.mode === "enforce") {
+      throw new ConflictError(
+        "This repository is in a maintainer cooldown.",
+        "maintainer_repo_cooldown",
+        {
+          repoId: identity.repoId,
+          cooldownUntil: cooldown.cooldownUntil,
+          reason: cooldown.reason
+        }
+      );
+    }
+
     const usage = await measureMaintainerRepoClaimUsage({
       stateStore: this.stateStore,
       repoId: identity.repoId,
@@ -220,7 +242,15 @@ export class JobExecutionService {
         activeClaims: usage.activeClaims,
         cap: usage.cap
       }, "maintainer_repo_claim_cap_unmeasured");
-      return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      const claimed = await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      if (cooldown.active && this.repoCooldown.mode !== "enforce") {
+        await this.noteMaintainerRepoCooldownWouldRefuse({
+          repoId: identity.repoId,
+          cooldownUntil: cooldown.cooldownUntil,
+          reason: cooldown.reason
+        });
+      }
+      return claimed;
     }
 
     const total = usage.openPrs + usage.activeClaims;
@@ -240,8 +270,51 @@ export class JobExecutionService {
       );
     }
     const claimed = await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+    if (cooldown.active && this.repoCooldown.mode !== "enforce") {
+      await this.noteMaintainerRepoCooldownWouldRefuse({
+        repoId: identity.repoId,
+        cooldownUntil: cooldown.cooldownUntil,
+        reason: cooldown.reason
+      });
+    }
     if (overCap) await this.noteMaintainerRepoClaimCapWouldRefuse(details, usage.ambiguous);
     return claimed;
+  }
+
+  async readActiveRepoCooldown(repoId) {
+    try {
+      const record = await getMaintainerRepoCooldown(this.stateStore, repoId);
+      return readCooldownDecision(record);
+    } catch {
+      return { active: false, unmeasured: true };
+    }
+  }
+
+  async noteMaintainerRepoCooldownWouldRefuse(details) {
+    await incrementMaintainerRepoCooldownCounter(this.stateStore, "wouldRefuse", this.logger, {
+      event: "maintainer_repo_cooldown_would_refuse",
+      surface: "claim",
+      ...details
+    });
+  }
+
+  async noteMaintainerRepoCooldownAmbiguous(reason) {
+    await incrementMaintainerRepoCooldownCounter(this.stateStore, "ambiguous", this.logger, {
+      event: "maintainer_repo_cooldown_ambiguous",
+      surface: "claim",
+      reason
+    });
+  }
+
+  async getMaintainerRepoCooldownStatus() {
+    const counters = await readMaintainerRepoCooldownCounters(this.stateStore);
+    return {
+      mode: this.repoCooldown.mode,
+      wouldRefuse: counters.wouldRefuse,
+      ambiguous: counters.ambiguous,
+      days: this.repoCooldown.days,
+      repeatDays: this.repoCooldown.repeatDays
+    };
   }
 
   lookupJobDefinition(jobId) {

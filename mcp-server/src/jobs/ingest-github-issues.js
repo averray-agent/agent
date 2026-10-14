@@ -88,14 +88,26 @@ export async function ingestGithubIssues({
     });
     return { issue, score: scoreIssue(issue), policy };
   }));
-  const skippedDetails = scored
-    .filter(({ score, policy }) => score < minScore || !policy.allowed)
-    .map(({ issue, score, policy }) => ({
-      repo: policy.repo ?? repoFromIssue(issue),
+  const skippedRows = scored.filter(({ score, policy }) => score < minScore || !policy.allowed);
+  const stopIssues = skippedRows
+    .filter(({ policy }) => policy.reason === "maintainer_stop_signal")
+    .map(({ issue }) => issue);
+  const stopRepoIds = stopIssues.length
+    ? await resolveIngestedRepoIds(stopIssues, { githubToken, fetchImpl })
+    : new Map();
+  const skippedDetails = skippedRows.map(({ issue, score, policy }) => {
+    const repo = policy.repo ?? repoFromIssue(issue);
+    const detail = {
+      repo,
       issueNumber: Number(issue.number),
       reason: policy.allowed ? "score_below_minimum" : policy.reason,
       score
-    }));
+    };
+    if (detail.reason === "maintainer_stop_signal") {
+      detail.repoId = stopRepoIds.get(normalizeRepo(repo)) ?? null;
+    }
+    return detail;
+  });
   const candidates = scored
     .filter(({ score, policy }) => score >= minScore && policy.allowed)
     .sort((left, right) => right.score - left.score)
