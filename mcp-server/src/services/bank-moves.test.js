@@ -649,6 +649,42 @@ test("a later JobClosed of an already rejected job stays rejected", () => {
   assert.match(move.line, /job rejected-job \(git-patch-tests-v1\) rejected/u);
 });
 
+test("a JobRejected at the same timestamp as JobClosed is not an earlier rejection", () => {
+  const current = claim({
+    sessionId: "closed-session",
+    jobId: "closed-job",
+    status: "resolved",
+    claimedAt: "2026-10-13T09:00:00.000Z"
+  });
+  const at = "2026-10-13T14:00:00.000Z";
+  const result = feed({
+    sessions: [current],
+    events: [
+      {
+        id: "rejected-same-second",
+        topic: "escrow.job_rejected",
+        txHash: hash("reject"),
+        timestamp: at,
+        jobId: current.jobId,
+        sessionId: current.sessionId
+      },
+      accountEvent("close", "account.reservation_released", hash("finalize"), { at }),
+      {
+        id: "closed-same-second",
+        topic: "escrow.job_closed",
+        txHash: hash("finalize"),
+        timestamp: at,
+        jobId: current.jobId,
+        sessionId: current.sessionId
+      }
+    ]
+  });
+  const move = result.moves.find((row) => row.id === "close");
+  assert.equal(move.attribution.basis, "escrow.job_closed");
+  assert.equal(move.work.status, "refunded");
+  assert.equal(move.line.includes("rejected"), false);
+});
+
 const CHAIN_JOB = `0x${"11".repeat(32)}`;
 const CLAIMANT = "0xAbCd000000000000000000000000000000000001";
 const CLAIMANT_LOWER = CLAIMANT.toLowerCase();
@@ -824,14 +860,14 @@ test("listener-shaped claims on a reopened job leave the reserve unreported", ()
         topic: "escrow.job_claimed",
         txHash: firstClaim,
         at: "2026-10-13T10:00:05.000Z",
-        worker: "0xAaAa000000000000000000000000000000000001",
+        worker: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa01",
         foundSession: true
       }),
       listenerEscrow({
         topic: "escrow.job_claimed",
         txHash: secondClaim,
         at: "2026-10-13T12:00:05.000Z",
-        worker: "0xBbBb000000000000000000000000000000000002",
+        worker: "0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb02",
         foundSession: true
       })
     ],
@@ -843,6 +879,111 @@ test("listener-shaped claims on a reopened job leave the reserve unreported", ()
   assert.equal(move.wallet.tag, "ambiguous");
   assert.equal(move.line.includes("job not reported"), true);
   assert.equal(move.line.includes("0xaaaa"), false);
+  assert.equal(move.line.includes("0xbbbb"), false);
+});
+
+test("a chain claim with no session does not hand the reserve to the re-claim", () => {
+  const alpha = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
+  const beta = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const fund = `0x${"41".repeat(32)}`;
+  const firstClaim = `0x${"42".repeat(32)}`;
+  const secondClaim = `0x${"43".repeat(32)}`;
+  const reclaimed = listenerSession({
+    wallet: beta,
+    claimedAt: "2026-10-13T12:00:06.000Z",
+    sessionId: `wiki-123:${beta}`
+  });
+  const result = feed({
+    sessions: [reclaimed],
+    events: [
+      accountEvent("reserve", "account.reserved", fund, { at: "2026-10-13T10:00:00.000Z" }),
+      {
+        ...listenerEscrow({
+          topic: "escrow.job_funded",
+          txHash: fund,
+          at: "2026-10-13T10:00:00.000Z",
+          worker: "0x0000000000000000000000000000000000000000",
+          foundSession: false
+        }),
+        sessionId: undefined
+      },
+      listenerEscrow({
+        topic: "escrow.job_claimed",
+        txHash: firstClaim,
+        at: "2026-10-13T10:00:05.000Z",
+        worker: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa01",
+        foundSession: false
+      }),
+      listenerEscrow({
+        topic: "escrow.job_claimed",
+        txHash: secondClaim,
+        at: "2026-10-13T12:00:05.000Z",
+        worker: "0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb02",
+        foundSession: true
+      })
+    ],
+    extra: { since: "2026-10-01T00:00:00.000Z" }
+  });
+  const move = result.moves[0];
+  assert.equal(move.work.jobId, NOT_REPORTED);
+  assert.equal(move.wallet.address, NOT_REPORTED);
+  assert.equal(move.line.includes("job not reported"), true);
+  assert.equal(move.line.includes("0xaaaa"), false);
+  assert.equal(move.line.includes("0xbbbb"), false);
+  assert.equal(move.line.includes(alpha), false);
+});
+
+test("a stale readJob snapshot does not replace the claim event's worker", () => {
+  const alpha = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01";
+  const beta = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02";
+  const fund = `0x${"51".repeat(32)}`;
+  const claimTx = `0x${"52".repeat(32)}`;
+  const first = listenerSession({
+    wallet: alpha,
+    claimedAt: "2026-10-13T10:00:06.000Z",
+    sessionId: `wiki-123:${alpha}`
+  });
+  const later = listenerSession({
+    wallet: beta,
+    claimedAt: "2026-10-13T12:00:06.000Z",
+    sessionId: `wiki-123:${beta}`
+  });
+  const claimed = listenerEscrow({
+    topic: "escrow.job_claimed",
+    txHash: claimTx,
+    at: "2026-10-13T10:00:05.000Z",
+    worker: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa01",
+    foundSession: true
+  });
+  const result = feed({
+    sessions: [later, first],
+    events: [
+      accountEvent("reserve", "account.reserved", fund, { at: "2026-10-13T10:00:00.000Z" }),
+      {
+        ...listenerEscrow({
+          topic: "escrow.job_funded",
+          txHash: fund,
+          at: "2026-10-13T10:00:00.000Z",
+          worker: "0x0000000000000000000000000000000000000000",
+          foundSession: false
+        }),
+        sessionId: undefined
+      },
+      {
+        ...claimed,
+        wallet: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa01",
+        data: {
+          ...claimed.data,
+          worker: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa01",
+          job: { worker: "0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb02" }
+        }
+      }
+    ],
+    extra: { since: "2026-10-01T00:00:00.000Z" }
+  });
+  const move = result.moves[0];
+  assert.equal(move.wallet.address, alpha);
+  assert.equal(move.work.jobId, "wiki-123");
   assert.equal(move.line.includes("0xbbbb"), false);
 });
 

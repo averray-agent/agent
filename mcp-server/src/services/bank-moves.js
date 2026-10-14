@@ -369,7 +369,12 @@ function distinctClaimWorkers(keys, allEvents) {
     const key = eventJobKey(event);
     const eventIds = [key.jobId, key.chainJobId].filter(Boolean).map((value) => value.toLowerCase());
     if (!eventIds.some((id) => ids.has(id))) continue;
-    const worker = key.worker || normalizeAddress(event?.wallet) || workerFromSessionId(event?.sessionId);
+    // data.worker and wallet are the JobClaimed arguments. data.job.worker is a
+    // readJob snapshot from processing time, so a catch-up that spans a reopen
+    // can show the later claimant on the earlier claim.
+    const worker = normalizeAddress(event?.data?.worker)
+      || normalizeAddress(event?.wallet)
+      || workerFromSessionId(event?.sessionId);
     if (worker) workers.add(worker);
   }
   return [...workers];
