@@ -2284,6 +2284,7 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.equal(status.jobLifecycle.claimable, 0);
   assert.equal(status.jobStaleSweeper.enabled, false);
   assert.equal(status.ops.maintainerRepoClaimCap.wouldRefuse, 4);
+  assert.equal(status.ops.maintainerRepoClaimCap.ambiguous, 0);
   assert.equal(status.ops.maintainerRepoClaimCap.mode, service.jobExecutionService.repoClaimCap.mode);
   assert.deepEqual(status.ops.maintainerRepoClaimCap.caps, {
     noMerge: service.jobExecutionService.repoClaimCap.capNoMerge,

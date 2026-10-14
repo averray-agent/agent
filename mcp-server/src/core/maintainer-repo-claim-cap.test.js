@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 
 import { JobExecutionService } from "./job-execution-service.js";
 import { MemoryStateStore } from "./state-store.js";
-import { loadMaintainerRepoClaimCapConfig } from "./maintainer-repo-claim-cap.js";
+import {
+  loadMaintainerRepoClaimCapConfig,
+  measureMaintainerRepoClaimUsage,
+  normalizeMaintainerRepoClaimCapConfig,
+  verificationShowsMerged
+} from "./maintainer-repo-claim-cap.js";
 import { repositoryPinKey } from "../services/github-repository-identity-backfill.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -271,6 +276,29 @@ test("two concurrent claims when one slot is free: exactly one succeeds", async 
   assert.equal(await stateStore.findSessionByJobId(secondJob.id), undefined);
 });
 
+test("log mode concurrent claims in one under-cap repo both succeed", async () => {
+  const stateStore = new MemoryStateStore();
+  const originalAcquire = stateStore.acquireClaimLock.bind(stateStore);
+  stateStore.acquireClaimLock = async (lockId, owner, ttl) => {
+    if (String(lockId).startsWith("maintainer-repo-claim:")) {
+      throw new Error("log mode must not take the repo lock");
+    }
+    return originalAcquire(lockId, owner, ttl);
+  };
+  const firstJob = githubJob({ id: "log-race-1", issueNumber: 2 });
+  const secondJob = githubJob({ id: "log-race-2", issueNumber: 3 });
+  const service = executionService([firstJob, secondJob], stateStore, { repoClaimCap: { mode: "log" } });
+
+  const results = await Promise.allSettled([
+    service.claimJob(WALLET, firstJob.id, "http", "log-race-1"),
+    service.claimJob(WALLET_2, secondJob.id, "http", "log-race-2")
+  ]);
+
+  assert.deepEqual(results.map((result) => result.status === "fulfilled" ? "ok" : result.reason?.code), ["ok", "ok"]);
+  assert.equal(await stateStore.findSessionByJobId(firstJob.id) ? 1 : 0, 1);
+  assert.equal(await stateStore.findSessionByJobId(secondJob.id) ? 1 : 0, 1);
+});
+
 test("an expired claim frees its slot without a sweep", async () => {
   const stateStore = new MemoryStateStore();
   await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-1", pullNumber: 1 }));
@@ -403,6 +431,187 @@ test("non-GitHub jobs are unaffected by the repo cap", async () => {
   assert.equal(claimed.jobId, job.id);
   assert.equal((await service.getMaintainerRepoClaimCapStatus()).wouldRefuse, 0);
   assert.equal(logs.some((entry) => String(entry.payload?.event ?? "").startsWith("maintainer_repo_claim_cap")), false);
+});
+
+test("a rejected verification with signals.merged does not raise the cap", () => {
+  assert.equal(verificationShowsMerged({
+    outcome: "rejected",
+    signals: { merged: true },
+    checks: { merged: true },
+    reputationSignals: { merged: 1 },
+    githubLookup: { merged: true }
+  }), false);
+});
+
+test("a rejected merged signal still leaves a no-merge repo on cap 2", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertSession({
+    sessionId: "rejected-merged",
+    jobId: "rejected-merged-job",
+    wallet: WALLET,
+    status: "resolved",
+    jobSnapshot: {
+      version: "job-snapshot-v1",
+      definition: githubJob({ id: "rejected-merged-job", issueNumber: 1 })
+    }
+  });
+  await stateStore.upsertVerificationResult("rejected-merged", {
+    outcome: "rejected",
+    signals: { merged: true }
+  });
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-a", pullNumber: 2 }));
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-b", pullNumber: 3 }));
+  const job = githubJob({ id: "third-after-rejection", issueNumber: 4 });
+  const service = executionService([job], stateStore, { repoClaimCap: { mode: "enforce" } });
+
+  await assert.rejects(
+    () => service.claimJob(WALLET, job.id, "http", "third-after-rejection"),
+    (error) => error.code === "maintainer_repo_claim_cap_reached" && error.details.cap === 2
+  );
+});
+
+test("wouldRefuse increments only after the claim is dispatched", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-1", pullNumber: 1 }));
+  await stateStore.upsertSession(claimedSession({ sessionId: "active-claim", jobId: "active-job" }));
+  const job = githubJob({ id: "dispatch-fails", issueNumber: 9 });
+  const service = executionService([job], stateStore, { repoClaimCap: { mode: "log" } });
+  const original = stateStore.upsertSession.bind(stateStore);
+  stateStore.upsertSession = async (session) => {
+    if (session.jobId === job.id) throw new Error("dispatch failed");
+    return original(session);
+  };
+
+  await assert.rejects(() => service.claimJob(WALLET, job.id, "http", "dispatch-fails"), /dispatch failed/);
+  assert.equal((await service.getMaintainerRepoClaimCapStatus()).wouldRefuse, 0);
+});
+
+test("a claim without a repository id increments the ambiguous counter", async () => {
+  const stateStore = new MemoryStateStore();
+  const logs = [];
+  const job = githubJob({ id: "no-repo-id", repoId: null, issueNumber: 1 });
+  const service = executionService([job], stateStore, { repoClaimCap: { mode: "log" }, logs });
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "no-repo-id");
+  assert.equal(claimed.jobId, job.id);
+  const status = await service.getMaintainerRepoClaimCapStatus();
+  assert.equal(status.ambiguous, 1);
+  assert.equal(status.wouldRefuse, 0);
+  assert.equal(logs.filter((entry) => entry.payload.event === "maintainer_repo_claim_cap_ambiguous").length, 1);
+});
+
+test("a truncated scan is unmeasured so an unseen merge cannot lower the tier", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "visible", pullNumber: 1 }));
+  await stateStore.upsertFundedJob({
+    jobId: "older-merge",
+    finalStatus: "merged",
+    source: { type: "github_issue", repo: "example/project", githubRepoId: REPO_ID },
+    upstream: { kind: "github_pull_request", repo: "example/project", pullNumber: 2 }
+  });
+  const usage = await measureMaintainerRepoClaimUsage({
+    stateStore,
+    repoId: REPO_ID,
+    caps: normalizeMaintainerRepoClaimCapConfig({}),
+    maxRows: 1
+  });
+  assert.equal(usage.measured, false);
+  assert.equal(usage.hasMerged, "not reported");
+  assert.equal(usage.cap, "not reported");
+  assert.equal(usage.openPrs, "not reported");
+});
+
+test("pin lookups are memoized and expired claims are not pinned", async () => {
+  const stateStore = new MemoryStateStore();
+  const pinnedJob = githubJob({
+    id: "pinned-issue",
+    repo: "old/name",
+    repoId: null,
+    createdAt: "2026-01-01T00:00:00.000Z"
+  });
+  await stateStore.putGithubRepositoryPin({
+    key: repositoryPinKey(pinnedJob),
+    source: { githubRepoId: REPO_ID },
+    pinnedAt: "2026-02-01T00:00:00.000Z"
+  });
+  await stateStore.upsertFundedJob(openPullRequest({
+    jobId: pinnedJob.id,
+    repo: "old/name",
+    includeRepoId: false,
+    pullNumber: 4
+  }));
+  await stateStore.upsertSession({
+    sessionId: "pinned-resolved",
+    jobId: pinnedJob.id,
+    wallet: WALLET,
+    status: "resolved",
+    jobSnapshot: { version: "job-snapshot-v1", definition: pinnedJob }
+  });
+  await stateStore.upsertSession(claimedSession({
+    sessionId: "expired-unpinned",
+    jobId: "expired-unpinned-job",
+    repo: "old/name",
+    repoId: null,
+    chainClaimExpiresAt: "2020-01-01T01:00:00.000Z"
+  }));
+  let pins = 0;
+  const original = stateStore.getGithubRepositoryPin.bind(stateStore);
+  stateStore.getGithubRepositoryPin = async (key) => {
+    pins += 1;
+    return original(key);
+  };
+  const usage = await measureMaintainerRepoClaimUsage({
+    stateStore,
+    repoId: REPO_ID,
+    getJobDefinition: (jobId) => jobId === pinnedJob.id ? pinnedJob : undefined,
+    caps: normalizeMaintainerRepoClaimCapConfig({})
+  });
+  assert.equal(pins, 1);
+  assert.equal(usage.openPrs, 1);
+  assert.equal(usage.activeClaims, 0);
+  assert.equal(usage.measured, true);
+});
+
+test("a merged funded job raises the cap without reading verifications", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertFundedJob({
+    jobId: "merged-funded",
+    finalStatus: "merged",
+    source: { type: "github_issue", repo: "example/project", githubRepoId: REPO_ID },
+    upstream: { kind: "github_pull_request", repo: "example/project", pullNumber: 1 }
+  });
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-a", pullNumber: 2 }));
+  await stateStore.upsertFundedJob(openPullRequest({ jobId: "open-b", pullNumber: 3 }));
+  await stateStore.upsertSession({
+    sessionId: "resolved-session",
+    jobId: "resolved-job",
+    wallet: WALLET,
+    status: "resolved",
+    jobSnapshot: {
+      version: "job-snapshot-v1",
+      definition: githubJob({ id: "resolved-job", issueNumber: 8 })
+    }
+  });
+  let verificationReads = 0;
+  const original = stateStore.getVerificationResult.bind(stateStore);
+  stateStore.getVerificationResult = async (sessionId) => {
+    verificationReads += 1;
+    return original(sessionId);
+  };
+  const caps = normalizeMaintainerRepoClaimCapConfig({});
+  const usage = await measureMaintainerRepoClaimUsage({
+    stateStore,
+    repoId: REPO_ID,
+    caps
+  });
+  assert.equal(verificationReads, 0);
+  assert.equal(usage.hasMerged, true);
+  assert.equal(usage.cap, 3);
+  stateStore.getVerificationResult = original;
+  const third = githubJob({ id: "third-from-funded-merge", issueNumber: 9 });
+  const service = executionService([third], stateStore, { repoClaimCap: { mode: "enforce" } });
+  const claimed = await service.claimJob(WALLET, third.id, "http", "third-from-funded-merge");
+  assert.equal(claimed.jobId, third.id);
 });
 
 test("submitWork still enforces the open-PR backstop", async () => {

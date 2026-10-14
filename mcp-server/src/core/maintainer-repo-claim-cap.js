@@ -7,11 +7,30 @@ export const DEFAULT_MAINTAINER_REPO_CAP_MERGED = 3;
 export const DEFAULT_MAINTAINER_REPO_CAP_OPTED_IN = 5;
 export const DEFAULT_MAINTAINER_REPO_CLAIM_CAP_MODE = "log";
 export const MAINTAINER_REPO_CLAIM_LOCK_TTL_SECONDS = 15 * 60;
+export const MAINTAINER_REPO_CLAIM_LOCK_WAIT_MS = 400;
+export const MAINTAINER_REPO_CLAIM_LOCK_POLL_MS = 40;
 export const MAINTAINER_REPO_CLAIM_CAP_STATE_SCOPE = "maintainer-repo-claim-cap";
 
 const OPEN_PR_EXCLUDED_STATUSES = new Set(["merged", "closed_unmerged", "open_stale", "reverted"]);
+const MERGE_PROOF_STATUSES = new Set(["submitted", "resolved", "closed", "disputed"]);
 const USAGE_PAGE_SIZE = 200;
 const USAGE_MAX_ROWS = 10_000;
+
+export async function acquireMaintainerRepoClaimLock(stateStore, lockId, owner, {
+  ttlSeconds = MAINTAINER_REPO_CLAIM_LOCK_TTL_SECONDS,
+  waitMs = MAINTAINER_REPO_CLAIM_LOCK_WAIT_MS,
+  pollMs = MAINTAINER_REPO_CLAIM_LOCK_POLL_MS,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = () => Date.now()
+} = {}) {
+  const deadline = now() + waitMs;
+  for (;;) {
+    const acquired = await stateStore.acquireClaimLock?.(lockId, owner, ttlSeconds);
+    if (acquired !== false) return true;
+    if (now() >= deadline) return false;
+    await sleep(pollMs);
+  }
+}
 
 export function maintainerRepoClaimLockId(repoId) {
   return `maintainer-repo-claim:${repoId}`;
@@ -71,6 +90,22 @@ export function verificationShowsMerged(verification) {
 
 export function isActiveUnsubmittedClaim(session, job, now = new Date()) {
   return session?.status === "claimed" && !isExpiredClaim(session, job, now);
+}
+
+function sessionCouldProveMerge(session) {
+  return MERGE_PROOF_STATUSES.has(session?.status);
+}
+
+function memoizedPinStore(stateStore) {
+  const cache = new Map();
+  return {
+    getGithubRepositoryPin: async (key) => {
+      if (cache.has(key)) return cache.get(key);
+      const pin = await stateStore.getGithubRepositoryPin?.(key);
+      cache.set(key, pin);
+      return pin;
+    }
+  };
 }
 
 export async function resolveJobRepoIdentity(job, stateStore) {
@@ -145,28 +180,32 @@ async function resolveFundedRecordIdentity(record, stateStore, getJobDefinition)
   };
 }
 
-async function listAllSessions(stateStore) {
-  if (typeof stateStore?.listRecentSessions !== "function") return null;
-  const sessions = [];
-  for (let offset = 0; sessions.length < USAGE_MAX_ROWS; offset += USAGE_PAGE_SIZE) {
-    const page = await stateStore.listRecentSessions(USAGE_PAGE_SIZE, offset);
-    if (!Array.isArray(page) || page.length === 0) break;
-    sessions.push(...page);
-    if (page.length < USAGE_PAGE_SIZE) break;
+async function listPaged(maxRows, fetchPage) {
+  if (typeof fetchPage !== "function") return null;
+  const rows = [];
+  for (let offset = 0; rows.length < maxRows; offset += USAGE_PAGE_SIZE) {
+    const limit = Math.min(USAGE_PAGE_SIZE, maxRows - rows.length);
+    const page = await fetchPage(limit, offset);
+    if (!Array.isArray(page)) return null;
+    if (page.length === 0) return { rows, truncated: false };
+    rows.push(...page.slice(0, limit));
+    if (page.length < limit) return { rows, truncated: false };
+    if (rows.length >= maxRows) {
+      const probe = await fetchPage(1, rows.length);
+      return { rows, truncated: Array.isArray(probe) && probe.length > 0 };
+    }
   }
-  return sessions;
+  return { rows, truncated: false };
 }
 
-async function listAllFundedJobs(stateStore) {
+async function listAllSessions(stateStore, maxRows) {
+  if (typeof stateStore?.listRecentSessions !== "function") return null;
+  return listPaged(maxRows, (limit, offset) => stateStore.listRecentSessions(limit, offset));
+}
+
+async function listAllFundedJobs(stateStore, maxRows) {
   if (typeof stateStore?.listFundedJobs !== "function") return null;
-  const records = [];
-  for (let offset = 0; records.length < USAGE_MAX_ROWS; offset += USAGE_PAGE_SIZE) {
-    const page = await stateStore.listFundedJobs({ limit: USAGE_PAGE_SIZE, offset });
-    if (!Array.isArray(page) || page.length === 0) break;
-    records.push(...page);
-    if (page.length < USAGE_PAGE_SIZE) break;
-  }
-  return records;
+  return listPaged(maxRows, (limit, offset) => stateStore.listFundedJobs({ limit, offset }));
 }
 
 function unmeasuredUsage(optedIn) {
@@ -187,29 +226,33 @@ export async function measureMaintainerRepoClaimUsage({
   getJobDefinition,
   claimingJob,
   now = new Date(),
-  caps
+  caps,
+  maxRows = USAGE_MAX_ROWS
 } = {}) {
   const optedInFromClaim = claimingJob?.source?.maintainerPolicy?.optedIn === true;
   let sessions;
   let fundedJobs;
   try {
-    sessions = await listAllSessions(stateStore);
-    fundedJobs = await listAllFundedJobs(stateStore);
+    sessions = await listAllSessions(stateStore, maxRows);
+    fundedJobs = await listAllFundedJobs(stateStore, maxRows);
   } catch {
     return unmeasuredUsage(optedInFromClaim);
   }
-  if (sessions === null || fundedJobs === null) {
+  if (sessions === null || fundedJobs === null || sessions.truncated || fundedJobs.truncated) {
+    // A truncated scan must not be reported as a complete count. Dropping an
+    // older merged PR would silently lower the tier from 3 to 2.
     return unmeasuredUsage(optedInFromClaim);
   }
 
+  const pinStore = memoizedPinStore(stateStore);
   let openPrs = 0;
   let activeClaims = 0;
   let ambiguous = 0;
   let hasMerged = false;
   let optedIn = optedInFromClaim;
 
-  for (const record of fundedJobs) {
-    const identity = await resolveFundedRecordIdentity(record, stateStore, getJobDefinition);
+  for (const record of fundedJobs.rows) {
+    const identity = await resolveFundedRecordIdentity(record, pinStore, getJobDefinition);
     if (identity.status === "ambiguous") {
       ambiguous += 1;
       continue;
@@ -220,17 +263,26 @@ export async function measureMaintainerRepoClaimUsage({
     if (isOpenAverrayPullRequest(record)) openPrs += 1;
   }
 
-  for (const session of sessions) {
-    const job = jobForSession(session, getJobDefinition);
+  // Pending brokered-claim:* service state is not an active claim until it
+  // converges into a session. It is not counted here.
+  for (const session of sessions.rows) {
+    const preliminary = session?.jobSnapshot?.definition;
+    const preliminaryJob = preliminary && typeof preliminary === "object" ? preliminary : undefined;
+    if (preliminaryJob?.source?.type && preliminaryJob.source.type !== "github_issue") continue;
+    const active = isActiveUnsubmittedClaim(session, preliminaryJob, now);
+    const mergeCandidate = !hasMerged && sessionCouldProveMerge(session);
+    if (!active && !mergeCandidate) continue;
+    const job = preliminaryJob ?? jobForSession(session, getJobDefinition);
     if (job?.source?.type !== "github_issue") continue;
-    const identity = await resolveJobRepoIdentity(job, stateStore);
+    const identity = await resolveJobRepoIdentity(job, pinStore);
     if (identity.status === "ambiguous") {
       ambiguous += 1;
       continue;
     }
     if (identity.status !== "known" || identity.repoId !== repoId) continue;
     if (job.source?.maintainerPolicy?.optedIn === true) optedIn = true;
-    if (isActiveUnsubmittedClaim(session, job, now)) activeClaims += 1;
+    if (active) activeClaims += 1;
+    if (!mergeCandidate) continue;
     const verification = await stateStore.getVerificationResult?.(session.sessionId);
     if (verificationShowsMerged(verification)) hasMerged = true;
   }

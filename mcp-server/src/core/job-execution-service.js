@@ -41,7 +41,7 @@ import {
 } from "./maintainer-surface-policy.js";
 import {
   MAINTAINER_REPO_CLAIM_CAP_STATE_SCOPE,
-  MAINTAINER_REPO_CLAIM_LOCK_TTL_SECONDS,
+  acquireMaintainerRepoClaimLock,
   maintainerRepoClaimLockId,
   measureMaintainerRepoClaimUsage,
   normalizeMaintainerRepoClaimCapConfig,
@@ -127,6 +127,7 @@ export class JobExecutionService {
       : DEFAULT_OPEN_PR_CAP_PER_REPO;
     this.repoClaimCap = normalizeMaintainerRepoClaimCapConfig(maintainerSurfaceConfig.repoClaimCap);
     this.repoClaimCapWouldRefuse = 0;
+    this.repoClaimCapAmbiguous = 0;
     this.repoClaimCapHydrated = false;
   }
 
@@ -166,21 +167,20 @@ export class JobExecutionService {
   async claimGithubIssueUnderRepoCap(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution) {
     const identity = await resolveJobRepoIdentity(job, this.stateStore);
     if (identity.status !== "known") {
-      this.logger.info?.({
-        event: "maintainer_repo_claim_cap_ambiguous",
-        repo: identity.repo
-      }, "maintainer_repo_claim_cap_ambiguous");
-      return this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      const claimed = await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      await this.noteMaintainerRepoClaimCapAmbiguous(identity.repo);
+      return claimed;
+    }
+
+    const dispatch = () => this.applyRepoClaimCap(identity, wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+    if (this.repoClaimCap.mode !== "enforce") {
+      return dispatch();
     }
 
     const lockId = maintainerRepoClaimLockId(identity.repoId);
     const lockOwner = randomUUID();
-    const lockAcquired = await this.stateStore.acquireClaimLock?.(
-      lockId,
-      lockOwner,
-      MAINTAINER_REPO_CLAIM_LOCK_TTL_SECONDS
-    );
-    if (lockAcquired === false) {
+    const lockAcquired = await acquireMaintainerRepoClaimLock(this.stateStore, lockId, lockOwner);
+    if (!lockAcquired) {
       throw new ConflictError(
         `Another claim is checking repository ${identity.repoId}'s open-item cap. Retry after it finishes.`,
         "maintainer_repo_claim_cap_in_progress",
@@ -189,55 +189,59 @@ export class JobExecutionService {
     }
 
     try {
-      const active = await this.stateStore.findSessionByJobId(jobId);
-      if (active) {
-        const refreshed = await this.materializeExpiredClaim(active, job);
-        if (!this.isTerminalSession(refreshed)) {
-          return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
-        }
-      }
-
-      const usage = await measureMaintainerRepoClaimUsage({
-        stateStore: this.stateStore,
-        repoId: identity.repoId,
-        getJobDefinition: (id) => this.lookupJobDefinition(id),
-        claimingJob: job,
-        caps: this.repoClaimCap
-      });
-      if (!usage.measured) {
-        this.logger.info?.({
-          event: "maintainer_repo_claim_cap_unmeasured",
-          repoId: identity.repoId,
-          repo: identity.repo,
-          openPrs: usage.openPrs,
-          activeClaims: usage.activeClaims,
-          cap: usage.cap
-        }, "maintainer_repo_claim_cap_unmeasured");
-        return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
-      }
-
-      const total = usage.openPrs + usage.activeClaims;
-      if (total >= usage.cap) {
-        const details = {
-          repoId: identity.repoId,
-          repo: identity.repo ?? normalizeRepo(job.source?.repo) ?? null,
-          openPrs: usage.openPrs,
-          activeClaims: usage.activeClaims,
-          cap: usage.cap
-        };
-        if (this.repoClaimCap.mode === "enforce") {
-          throw new ConflictError(
-            `Repository ${details.repo ?? details.repoId} already has ${total} open Averray items.`,
-            "maintainer_repo_claim_cap_reached",
-            details
-          );
-        }
-        await this.noteMaintainerRepoClaimCapWouldRefuse(details, usage.ambiguous);
-      }
-      return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      return await dispatch();
     } finally {
       await this.stateStore.releaseClaimLock?.(lockId, lockOwner);
     }
+  }
+
+  async applyRepoClaimCap(identity, wallet, jobId, protocol, idempotencyKey, job, claimantAttribution) {
+    const active = await this.stateStore.findSessionByJobId(jobId);
+    if (active) {
+      const refreshed = await this.materializeExpiredClaim(active, job);
+      if (!this.isTerminalSession(refreshed)) {
+        return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+      }
+    }
+
+    const usage = await measureMaintainerRepoClaimUsage({
+      stateStore: this.stateStore,
+      repoId: identity.repoId,
+      getJobDefinition: (id) => this.lookupJobDefinition(id),
+      claimingJob: job,
+      caps: this.repoClaimCap
+    });
+    if (!usage.measured) {
+      this.logger.info?.({
+        event: "maintainer_repo_claim_cap_unmeasured",
+        repoId: identity.repoId,
+        repo: identity.repo,
+        openPrs: usage.openPrs,
+        activeClaims: usage.activeClaims,
+        cap: usage.cap
+      }, "maintainer_repo_claim_cap_unmeasured");
+      return await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+    }
+
+    const total = usage.openPrs + usage.activeClaims;
+    const overCap = total >= usage.cap;
+    const details = {
+      repoId: identity.repoId,
+      repo: identity.repo ?? normalizeRepo(job.source?.repo) ?? null,
+      openPrs: usage.openPrs,
+      activeClaims: usage.activeClaims,
+      cap: usage.cap
+    };
+    if (overCap && this.repoClaimCap.mode === "enforce") {
+      throw new ConflictError(
+        `Repository ${details.repo ?? details.repoId} already has ${total} open Averray items.`,
+        "maintainer_repo_claim_cap_reached",
+        details
+      );
+    }
+    const claimed = await this.dispatchClaim(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
+    if (overCap) await this.noteMaintainerRepoClaimCapWouldRefuse(details, usage.ambiguous);
+    return claimed;
   }
 
   lookupJobDefinition(jobId) {
@@ -251,23 +255,39 @@ export class JobExecutionService {
   async noteMaintainerRepoClaimCapWouldRefuse(details, ambiguous) {
     await this.hydrateMaintainerRepoClaimCapCounter();
     this.repoClaimCapWouldRefuse += 1;
-    const wouldRefuse = this.repoClaimCapWouldRefuse;
     this.logger.info?.({
       event: "maintainer_repo_claim_cap_would_refuse",
       ...details,
       ambiguous,
-      wouldRefuse
+      wouldRefuse: this.repoClaimCapWouldRefuse
     }, "maintainer_repo_claim_cap_would_refuse");
+    await this.persistMaintainerRepoClaimCapCounters();
+  }
+
+  async noteMaintainerRepoClaimCapAmbiguous(repo) {
+    await this.hydrateMaintainerRepoClaimCapCounter();
+    this.repoClaimCapAmbiguous += 1;
+    this.logger.info?.({
+      event: "maintainer_repo_claim_cap_ambiguous",
+      repo: repo ?? null,
+      ambiguous: this.repoClaimCapAmbiguous
+    }, "maintainer_repo_claim_cap_ambiguous");
+    await this.persistMaintainerRepoClaimCapCounters();
+  }
+
+  async persistMaintainerRepoClaimCapCounters() {
     if (!this.repoClaimCapHydrated) return;
     try {
       await this.stateStore.upsertServiceState?.(MAINTAINER_REPO_CLAIM_CAP_STATE_SCOPE, {
-        wouldRefuse,
+        wouldRefuse: this.repoClaimCapWouldRefuse,
+        ambiguous: this.repoClaimCapAmbiguous,
         updatedAt: new Date().toISOString()
       });
     } catch {
       this.logger.warn?.({
         event: "maintainer_repo_claim_cap_counter_persist_failed",
-        wouldRefuse
+        wouldRefuse: this.repoClaimCapWouldRefuse,
+        ambiguous: this.repoClaimCapAmbiguous
       }, "maintainer_repo_claim_cap_counter_persist_failed");
     }
   }
@@ -276,9 +296,13 @@ export class JobExecutionService {
     if (this.repoClaimCapHydrated) return;
     try {
       const stored = await this.stateStore.getServiceState?.(MAINTAINER_REPO_CLAIM_CAP_STATE_SCOPE);
-      const storedCount = stored?.wouldRefuse;
-      if (Number.isInteger(storedCount) && storedCount > this.repoClaimCapWouldRefuse) {
-        this.repoClaimCapWouldRefuse = storedCount;
+      const storedWouldRefuse = stored?.wouldRefuse;
+      const storedAmbiguous = stored?.ambiguous;
+      if (Number.isInteger(storedWouldRefuse) && storedWouldRefuse > this.repoClaimCapWouldRefuse) {
+        this.repoClaimCapWouldRefuse = storedWouldRefuse;
+      }
+      if (Number.isInteger(storedAmbiguous) && storedAmbiguous > this.repoClaimCapAmbiguous) {
+        this.repoClaimCapAmbiguous = storedAmbiguous;
       }
       this.repoClaimCapHydrated = true;
     } catch {
@@ -292,6 +316,7 @@ export class JobExecutionService {
     return {
       mode: this.repoClaimCap.mode,
       wouldRefuse: this.repoClaimCapWouldRefuse,
+      ambiguous: this.repoClaimCapAmbiguous,
       caps: {
         noMerge: this.repoClaimCap.capNoMerge,
         merged: this.repoClaimCap.capMerged,
