@@ -155,10 +155,12 @@ export async function createConfiguredX402VerificationPaymentGate(
         : submitter ?? createBaseSubmitter(env, baseProvider, logger),
       now
     });
-    // Validate and cache the token domain before the HTTP listener opens.
-    // No unpaid request should pay the first RPC round trip. A failed/bounded
-    // startup read keeps Verify unavailable, as with invalid configuration.
-    await admissionRead(() => gate.eip712Domain(), "eip712_domain_startup");
+    // Warm before listening, but retain the configured gate (including capture
+    // reconciliation) through an RPC outage. Domain reads own bounded retries.
+    await gate.eip712Domain().catch((error) => logger.warn?.(
+      { reasonCode: "verify_payment_domain_unavailable", err: error },
+      "verification_payment_gate.domain_unavailable"
+    ));
     return gate;
   } catch (error) {
     logger.warn?.(
@@ -188,6 +190,10 @@ export class X402VerificationPaymentGate {
     this.captureToken = captureTokenContract ?? new Contract(config.asset, TOKEN_ABI, submitter);
     this.now = now;
     this.domainPromise = undefined;
+    this.domainReady = false;
+    this.domainError = undefined;
+    this.domainRetryDelayMs = 1_000;
+    this.domainRetryTimer = undefined;
   }
 
   async authorize({ paymentProof, price, profile, profileLimits, requestHash, findExistingRun } = {}) {
@@ -449,47 +455,82 @@ export class X402VerificationPaymentGate {
     return { submitted: false };
   }
 
+  getDomainWarnings() {
+    return this.domainReady ? [] : [{
+      code: "verify_payment_domain_unavailable", severity: "warning",
+      retryable: this.domainError?.details?.retryable ?? true
+    }];
+  }
+
   async eip712Domain() {
-    this.domainPromise ??= this.readEip712Domain().catch((error) => {
-      this.domainPromise = undefined;
-      throw error;
-    });
+    // A deterministic identity mismatch requires operator correction/restart.
+    if (this.domainError?.details?.retryable === false) throw this.domainError;
+    if (!this.domainPromise) {
+      clearTimeout(this.domainRetryTimer);
+      this.domainRetryTimer = undefined;
+      this.domainPromise = admissionRead(() => this.readEip712Domain(), "eip712_domain")
+        .then((domain) => {
+          this.domainReady = true;
+          this.domainError = undefined;
+          this.domainRetryDelayMs = 1_000;
+          return domain;
+        }).catch((cause) => {
+          this.domainPromise = undefined;
+          this.domainReady = false;
+          const retryable = cause?.code !== "payment_domain_mismatch"
+            && !(cause?.code === "NETWORK_ERROR" && cause?.event === "changed");
+          this.domainError = new AppError(
+            "Verify payment domain validation is unavailable. No work was admitted and no money moved.",
+            { code: "payment_domain_unavailable", statusCode: 503, details: {
+              status: "unavailable", retryable, customerFunds: "unchanged",
+              action: retryable ? "retry_when_base_domain_reads_recover" : "operator_check_payment_domain"
+            } }
+          );
+          if (retryable) {
+            // Requests can retry immediately; idle processes recover too. Failed
+            // attempts back off 1, 2, 4, ... 30 seconds, each bounded to 8 seconds.
+            this.domainRetryTimer = setTimeout(() => {
+              void this.eip712Domain().catch(() => {});
+            }, this.domainRetryDelayMs);
+            this.domainRetryTimer.unref?.();
+            this.domainRetryDelayMs = Math.min(this.domainRetryDelayMs * 2, 30_000);
+          }
+          throw this.domainError;
+        });
+    }
     return this.domainPromise;
   }
 
+  close() {
+    clearTimeout(this.domainRetryTimer);
+  }
+
   async readEip712Domain() {
-    try {
-      const [network, liveName, onchainSeparator] = await Promise.all([
-        this.provider.getNetwork(),
-        this.token.name(),
-        this.token.DOMAIN_SEPARATOR()
-      ]);
-      if (BigInt(network.chainId) !== BigInt(this.config.chainId)) {
-        throw new Error(`Base RPC returned chainId ${network.chainId}.`);
-      }
-      if (String(liveName) !== this.config.assetEip712Name) {
-        throw new Error(
-          `Configured EIP-712 name ${JSON.stringify(this.config.assetEip712Name)} does not match token name() ${JSON.stringify(liveName)}.`
-        );
-      }
-      const domain = Object.freeze({
-        name: String(liveName),
-        version: this.config.assetEip712Version,
-        chainId: this.config.chainId,
-        verifyingContract: this.config.asset
-      });
-      const reproduced = TypedDataEncoder.hashDomain(domain);
-      if (!BYTES32_RE.test(String(onchainSeparator)) || reproduced.toLowerCase() !== String(onchainSeparator).toLowerCase()) {
-        throw new Error("Token name(), version, chainId, and address do not reproduce DOMAIN_SEPARATOR().");
-      }
-      return domain;
-    } catch (error) {
-      throw new PaymentVerificationError(
-        `Averray could not reproduce the Base token's EIP-712 domain from name(): ${error?.message ?? String(error)} No work ran and no money moved.`,
-        "payment_domain_unavailable",
-        { action: "retry_when_base_domain_reads_recover", customerFunds: "unchanged" }
+    const [network, liveName, onchainSeparator] = await Promise.all([
+      this.provider.getNetwork(),
+      this.token.name(),
+      this.token.DOMAIN_SEPARATOR()
+    ]);
+    const mismatch = (message) => new AppError(message, { code: "payment_domain_mismatch" });
+    if (BigInt(network.chainId) !== BigInt(this.config.chainId)) {
+      throw mismatch(`Base RPC returned chainId ${network.chainId}.`);
+    }
+    if (String(liveName) !== this.config.assetEip712Name) {
+      throw mismatch(
+        `Configured EIP-712 name ${JSON.stringify(this.config.assetEip712Name)} does not match token name() ${JSON.stringify(liveName)}.`
       );
     }
+    const domain = Object.freeze({
+      name: String(liveName),
+      version: this.config.assetEip712Version,
+      chainId: this.config.chainId,
+      verifyingContract: this.config.asset
+    });
+    const reproduced = TypedDataEncoder.hashDomain(domain);
+    if (!BYTES32_RE.test(String(onchainSeparator)) || reproduced.toLowerCase() !== String(onchainSeparator).toLowerCase()) {
+      throw mismatch("Token name(), version, chainId, and address do not reproduce DOMAIN_SEPARATOR().");
+    }
+    return domain;
   }
 
   paymentRequirements({ domain, price, profile, profileLimits, requestHash }) {

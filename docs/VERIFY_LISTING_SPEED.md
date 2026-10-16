@@ -33,7 +33,7 @@ unambiguous. The metric registry itself has no quantile buckets.
 The first baseline unpaid probe made three Base provider calls; later
 probes reused the domain cache. After the change, the three calls finish
 before the server listens, and every unpaid probe makes zero provider
-calls. The final after sample was taken after the full suites stopped; an earlier
+calls. The pre-handback after sample was taken after the full suites stopped; an earlier
 exploratory after sample had p95 values of 1 / 3 / 5 / 0 ms respectively.
 Short local timing samples are noisy; the counter tests establish
 removed work independently of p95. No claim is made that local timings
@@ -61,12 +61,23 @@ The configured Verify gate factory is asynchronous. Bootstrap awaits it,
 validating the chain ID, token name and reproduced EIP-712 domain separator
 before accepting requests. The existing domain promise cache is retained;
 no authorization, balance, nonce, capture or reconciliation logic changes.
-Startup validation uses an eight-second bound. If it fails, the factory
-returns the existing unavailable-gate fallback and logs the reason; other
-API routes can still start. **That process needs a restart after Base reads
-recover to enable Verify.** It never quotes an unvalidated domain. This
-startup dependency is the operational tradeoff for moving the first read
-off unpaid requests. Paid admission retains its existing deadlines.
+Startup validation uses an eight-second bound and always retains a correctly
+configured gate. A transport failure or timeout retries in the background
+with 1/2/4/8/16/30-second capped backoff and lazily on the next request;
+concurrent attempts share one promise. Successful recovery stops retries
+and caches the domain again. Chain ID, token name and separator mismatches
+stay fail-closed until operator correction and restart. Paid admission
+retains its existing deadlines and in-flight captures retain their gate.
+
+While the domain is unavailable, unpaid probes and x402 discovery return
+HTTP 503 `payment_domain_unavailable`, with `details.status: unavailable`
+and `Cache-Control: no-store`. No empty healthy discovery or 402 without
+requirements is emitted. `/health` is degraded with the warning
+`verify_payment_domain_unavailable`; process liveness keeps its existing
+HTTP status policy. A successful retry clears the warning without restart.
+The real-server smoke fixture verifies boot outage, recovery and zero
+provider calls on subsequent probes/discovery; `--assert-recovery` runs
+that scenario in the internal measurement script.
 
 The root, OpenAPI and llms representations share one build promise per
 router/process, including concurrent first requests. JSON serialization,
@@ -82,6 +93,11 @@ The full payment suite retains the X1d–X1f price and stored-authorization
 reconciliation guards. Mutation drills cover startup warmup, bootstrap
 awaiting, domain cache reuse, static build/serialization reuse, ETag bytes,
 conditional responses, cache headers, 304 length and HEAD suppression.
+Handback drills additionally remove background/lazy retry, promise reset,
+the timeout, backoff cap, fail-closed mismatch guard and health warning;
+they also substitute a healthy empty discovery and inject a root build
+timestamp. Independent routers built a day apart must produce identical
+bytes and ETags for every cached representation.
 
 ## x402-list price and probe evidence
 

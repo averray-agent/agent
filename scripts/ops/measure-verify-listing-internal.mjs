@@ -11,6 +11,8 @@ import { metricPathLabel } from "../../mcp-server/src/protocols/http/http-helper
 const output = process.argv[2];
 assert.ok(output && !output.startsWith("--"), "Usage: node scripts/ops/measure-verify-listing-internal.mjs <output.json> [--assert-guards]");
 const checkGuards = process.argv.includes("--assert-guards");
+const checkRecovery = process.argv.includes("--assert-recovery");
+let rpcDown = checkRecovery;
 const root = process.cwd();
 const abi = new Interface(["function name() view returns (string)", "function DOMAIN_SEPARATOR() view returns (bytes32)"]);
 const domain = { name: "USD Coin", version: "2", chainId: 8453,
@@ -20,6 +22,12 @@ const rpc = createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk;
   const input = JSON.parse(body);
+  if (rpcDown && req.url !== "/hub") {
+    rpcCalls += Array.isArray(input) ? input.length : 1;
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "temporary RPC outage" }));
+    return;
+  }
   const answer = (msg) => {
     if (req.url !== "/hub") rpcCalls++;
     const unsupported = { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "unimplemented fixture call" } };
@@ -77,6 +85,41 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok(ready, `boot timeout: ${stderr}`);
+  if (checkRecovery) {
+    const post = (body = {}) => request("/verify/runs", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const health = await (await request("/health")).json();
+    assert.equal(health.status, "degraded");
+    assert.ok(health.warnings.some((warning) => warning.code === "verify_payment_domain_unavailable"));
+    for (const response of [await post(), await request("/.well-known/x402")]) {
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("payment-required"), null);
+      const body = await response.json();
+      assert.equal(body.error, "payment_domain_unavailable");
+      assert.equal(body.details.status, "unavailable");
+      assert.equal(body.accepts, undefined);
+      assert.equal(body.resources, undefined, "outage cannot look like a healthy empty catalogue");
+      assert.ok(!body.message.includes("not enabled yet"));
+    }
+    rpcDown = false;
+    const recovered = await post();
+    assert.equal(recovered.status, 402, await recovered.clone().text());
+    assert.equal((await recovered.json()).accepts.length, 3);
+    const recoveredHealth = await (await request("/health")).json();
+    assert.ok(!recoveredHealth.warnings.some((warning) => warning.code === "verify_payment_domain_unavailable"));
+    const before = rpcCalls;
+    const discovery = await request("/.well-known/x402");
+    assert.equal(discovery.status, 200);
+    assert.equal((await discovery.json()).resources[0].accepts.length, 3);
+    const profiles = (await (await request("/verify/profiles")).json()).profiles;
+    for (const profile of profiles) {
+      const response = await post(profile.workedExample.request);
+      assert.equal(response.status, 402);
+      assert.equal((await response.json()).accepts[0].amount, profile.price.amountRaw);
+    }
+    assert.equal(rpcCalls, before, "recovered unpaid requests and discovery must stay RPC-free");
+  }
   const readMetric = async (path, method, required = false) => {
     const res = await request("/metrics"); assert.equal(res.status, 200);
     const text = await res.text();

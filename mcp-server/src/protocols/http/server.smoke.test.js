@@ -2969,3 +2969,18 @@ test("http smoke: listing startup warms Base domain and all probes are RPC-free 
     await rm(temporary, { recursive: true, force: true });
   }
 });
+
+
+test("http smoke: listing RPC outage reports unavailable then recovers without restart", SMOKE_TEST_OPTIONS, async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const temporary = await mkdtemp(resolve(tmpdir(), "listing-recovery-"));
+  try {
+    await promisify(execFile)(process.execPath, ["scripts/ops/measure-verify-listing-internal.mjs",
+      resolve(temporary, "measurements.json"), "--assert-recovery"], {
+      cwd: resolve(moduleDir, "../../../.."), timeout: 12_000, maxBuffer: 1_000_000
+    });
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+});

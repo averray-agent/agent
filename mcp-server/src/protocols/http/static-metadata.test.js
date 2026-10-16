@@ -88,3 +88,24 @@ test("listing OpenAPI describes conditional requests and bodyless 304s for all c
     assert.equal(operation.responses["304"].content, undefined);
   }
 });
+
+
+test("listing static bytes and ETags are pure across independent routers built at different times", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const build = async () => {
+    const route = createPublicMetadataRoutes({ respond, respondText,
+      authConfig: { mode: "strict" }, publicBaseUrl: "https://api.example.test" });
+    const bodies = [];
+    for (const path of ["/", "/openapi.json", "/llms.txt"]) {
+      const res = response();
+      await route({ request: { method: "GET" }, response: res, pathname: path });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.etag, `"${createHash("sha256").update(res.body).digest("hex")}"`);
+      bodies.push({ path, body: res.body, etag: res.headers.etag });
+    }
+    return bodies;
+  };
+  const before = await build();
+  t.mock.timers.tick(86_400_000);
+  assert.deepEqual(await build(), before, "static bodies cannot contain build time or other request/process entropy");
+});

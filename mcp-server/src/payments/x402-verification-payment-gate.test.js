@@ -295,7 +295,7 @@ test("malformed authorization integers are actionable 402 refusals and transient
   const transient = harness({ domainFailures: 1 });
   await assert.rejects(
     () => transient.gate.eip712Domain(),
-    (error) => error.statusCode === 402 && error.code === "payment_domain_unavailable"
+    (error) => error.statusCode === 503 && error.code === "payment_domain_unavailable"
   );
   assert.equal((await transient.gate.eip712Domain()).name, "USD Coin");
 

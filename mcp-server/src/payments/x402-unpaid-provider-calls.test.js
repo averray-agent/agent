@@ -69,7 +69,7 @@ test("listing unpaid probes use the startup-validated domain: zero provider call
   assert.deepEqual(await store.listActiveVerificationRuns(100), []);
 });
 
-test("listing startup waits for domain validation and fails closed on wrong chain or RPC failure", async () => {
+test("listing startup waits for domain validation", async () => {
   let release;
   const f = fixture({ network: () => new Promise((resolve) => { release = resolve; }) });
   let ready = false;
@@ -78,18 +78,109 @@ test("listing startup waits for domain validation and fails closed on wrong chai
   assert.equal(ready, false);
   release({ chainId: 8453n });
   assert.ok(await pending);
-  for (const network of [async () => ({ chainId: 1n }), async () => { throw new Error("RPC unavailable"); }]) {
-    const bad = fixture({ network });
-    assert.equal(await createConfiguredX402VerificationPaymentGate(env, bad.options), undefined);
-    assert.equal(bad.warnings.length, 1);
-  }
 });
 
-test("listing startup domain validation is bounded to eight seconds", async (t) => {
+for (const mismatch of ["chain", "provider-chain", "name", "separator"]) {
+  test(`listing ${mismatch} mismatch stays fail-closed without retrying`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const f = fixture({ network: async () => {
+      if (mismatch === "provider-chain") throw Object.assign(new Error("network changed"), { code: "NETWORK_ERROR", event: "changed" });
+      return { chainId: mismatch === "chain" ? 1n : 8453n };
+    } });
+    f.options.tokenContract = {
+      name: async () => mismatch === "name" ? "wrong" : domain.name,
+      // Match the wrong live name in its separator, so removing the name
+      // comparison cannot hide behind the separator comparison.
+      DOMAIN_SEPARATOR: async () => mismatch === "separator" ? "0x" + "00".repeat(32)
+        : TypedDataEncoder.hashDomain({ ...domain, name: mismatch === "name" ? "wrong" : domain.name })
+    };
+    const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
+    t.after(() => gate?.close());
+    assert.ok(gate, "valid config must retain its gate");
+    assert.equal(f.warnings.length, 1);
+    const reads = f.calls.length;
+    f.options.provider.getNetwork = async () => assert.fail("identity mismatch must not retry");
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(gate.eip712Domain(), { statusCode: 503, code: "payment_domain_unavailable",
+        details: { status: "unavailable", retryable: false, customerFunds: "unchanged", action: "operator_check_payment_domain" } });
+      t.mock.timers.tick(60_000);
+      await new Promise(setImmediate);
+    }
+    assert.equal(f.calls.length, reads);
+    assert.equal(gate.getDomainWarnings()[0].code, "verify_payment_domain_unavailable");
+  });
+}
+
+test("listing RPC outage returns 503 then lazily recovers on the same gate, including in-flight capture reconciliation", async (t) => {
+  let down = true;
+  const f = fixture({ network: async () => {
+    if (down) throw new Error("RPC unavailable");
+    return { chainId: 8453n };
+  } });
+  const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
+  t.after(() => gate?.close());
+  assert.ok(gate);
+  assert.equal(gate.getDomainWarnings()[0].code, "verify_payment_domain_unavailable");
+  const service = new VerificationRunService({ stateStore: new MemoryStateStore(),
+    profileRegistry: new VerificationProfileRegistry(), paymentGate: gate });
+  const route = createVerifyRoutes({ enforceLimit: async () => {}, rateLimitConfig: { verifierRun: {} },
+    readJsonBody, respond, verificationRunService: service });
+  const post = () => invokeHttpRoute(route, { method: "POST", path: "/verify/runs", body: {} });
+  await assert.rejects(post(), { statusCode: 503, code: "payment_domain_unavailable" });
+  f.options.provider.getTransactionReceipt = async () => {
+    if (down) throw new Error("RPC unavailable");
+    return { status: 1 };
+  };
+  const pendingCapture = { authorization: {}, pendingTransactionHash: "0x" + "ab".repeat(32) };
+  await assert.rejects(gate.reconcileCapture(pendingCapture), /RPC unavailable/);
+  down = false;
+  const replies = await Promise.all([post(), post(), post()]);
+  for (const reply of replies) { assert.equal(reply.statusCode, 402); assert.equal(reply.body.accepts.length, 3); }
+  assert.deepEqual(gate.getDomainWarnings(), []);
+  assert.deepEqual(await gate.reconcileCapture(pendingCapture), { status: "captured",
+    transactionHash: pendingCapture.pendingTransactionHash, proof: "reconciled_from_chain" });
+  f.calls.length = 0;
+  await post();
+  assert.deepEqual(f.calls, [], "healthy requests reuse the recovered domain");
+});
+
+test("listing background recovery retries with bounded exponential backoff without any request", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const f = fixture({ network: () => new Promise(() => {}) });
+  let down = true;
+  const f = fixture({ network: async () => {
+    if (down) throw new Error("RPC unavailable");
+    return { chainId: 8453n };
+  } });
+  const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
+  t.after(() => gate.close());
+  let attempts = 1;
+  for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+    t.mock.timers.tick(delay - 1); await new Promise(setImmediate);
+    assert.equal(f.calls.filter((c) => c === "getNetwork").length, attempts, "backoff avoids a retry storm");
+    t.mock.timers.tick(1); await new Promise(setImmediate);
+    assert.equal(f.calls.filter((c) => c === "getNetwork").length, ++attempts);
+  }
+  down = false;
+  t.mock.timers.tick(30_000); await new Promise(setImmediate);
+  assert.deepEqual(gate.getDomainWarnings(), [], "background retry must recover without a probe");
+  const reads = f.calls.length;
+  t.mock.timers.tick(60_000); await new Promise(setImmediate);
+  assert.equal(f.calls.length, reads, "success stops background reads");
+});
+
+test("listing startup domain timeout is bounded to eight seconds and recovers", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let down = true;
+  const f = fixture({ network: () => down ? new Promise(() => {}) : Promise.resolve({ chainId: 8453n }) });
   const pending = createConfiguredX402VerificationPaymentGate(env, f.options);
+  await new Promise(setImmediate);
   t.mock.timers.tick(8_000);
-  assert.equal(await pending, undefined);
-  assert.equal(f.warnings[0][0].err.code, "payment_chain_read_timeout");
+  const gate = await pending;
+  t.after(() => gate.close());
+  assert.ok(gate);
+  assert.equal(f.warnings[0][0].err.code, "payment_domain_unavailable");
+  assert.equal(f.warnings[0][0].err.statusCode, 503);
+  down = false;
+  t.mock.timers.tick(1_000); await new Promise(setImmediate);
+  assert.deepEqual(gate.getDomainWarnings(), []);
 });
