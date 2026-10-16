@@ -329,3 +329,17 @@ test("pricing: missing or unknown profile errors name every published profile wi
   }
   assert.equal(h.calls.authorize, 0);
 });
+
+
+test("pricing: a valid profile with an incomplete envelope explains the missing fields", async () => {
+  const h = discoveryHarness();
+  await assert.rejects(h.post({ profile: "mcp-failure-semantics-v1" }), (error) => {
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "invalid_request");
+    assert.match(error.message, /verifyRequest\.profileVersion must be an integer/u);
+    assert.match(error.message, /Published profiles:/u);
+    assert.doesNotMatch(error.message, /Reference a published profile/u);
+    return true;
+  });
+  assert.equal(h.calls.authorize, 0);
+});

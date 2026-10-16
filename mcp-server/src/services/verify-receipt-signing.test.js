@@ -3,7 +3,7 @@ import test from "node:test";
 import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { p256 } from "@noble/curves/nist.js";
-import { Interface, Signature } from "ethers";
+import { formatUnits, Interface, Signature } from "ethers";
 import { X402VerificationPaymentGate } from "../payments/x402-verification-payment-gate.js";
 import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 import { canonicalBadgeReceiptBytes, KmsBadgeReceiptSigner, verifyBadgeReceiptSignature } from "../core/badge-receipt-signing.js";
@@ -164,13 +164,21 @@ const captureAbi = new Interface([
   "event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)",
   "event Transfer(address indexed from, address indexed to, uint256 value)"
 ]);
-async function captureFixture({ waitFails = false, noHash = false } = {}) {
+const capturePrices = [
+  { profileName: "git-patch-tests-v1", amountRaw: "5000000" },
+  { profileName: "mcp-failure-semantics-v1", amountRaw: "250000" }
+];
+async function captureFixture({ waitFails = false, noHash = false,
+  profileName = "mcp-failure-semantics-v1", authorizedAmountRaw } = {}) {
   const f = await signingFixture();
   const store = new MemoryStateStore();
   const profiles = new VerificationProfileRegistry();
+  const profile = profiles.get(profileName, 1);
+  const price = { ...profile.price, amountRaw: authorizedAmountRaw ?? profile.price.amountRaw };
+  price.amount = formatUnits(price.amountRaw, price.decimals).replace(/\.0$/u, "");
   const hash = "0x" + "a".repeat(64);
   const asset = "0x" + "5".repeat(40);
-  const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: profiles.get("mcp-failure-semantics-v1", 1).price.amountRaw,
+  const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: price.amountRaw,
     validAfter: "0", validBefore: "9999999999", nonce: "0x" + "3".repeat(64) };
   const state = { used: false, transfers: 0, releases: 0, evaluations: 0, receipt: null, events: [], logs: [], waitFails, noHash,
     head: 101, reads: 0, now: Date.parse("2026-10-09T16:00:00Z") };
@@ -214,7 +222,7 @@ async function captureFixture({ waitFails = false, noHash = false } = {}) {
     } }
   });
   gate.release = async () => { state.releases++; };
-  const authorization = { id: "paid", ...profiles.get("mcp-failure-semantics-v1", 1).price, customer: proof.from, authorization: proof, authorizedAtBlock: 100,
+  const authorization = { id: "paid", ...price, customer: proof.from, authorization: proof, authorizedAtBlock: 100,
     signature: Signature.from({ r: "0x" + "1".repeat(64), s: "0x" + "2".repeat(64), v: 27 }).serialized };
   const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate,
     badgeReceiptSigner: f.signer, logger: { warn: (...args) => state.logs.push(args) }, now: () => new Date(state.now) });
@@ -223,8 +231,8 @@ async function captureFixture({ waitFails = false, noHash = false } = {}) {
     state.evaluations++;
     return state.evaluations === 1 ? verdict : { outcome: "rejected", reasonCode: "FAIL" };
   };
-  const run = { runId: "capture-test", status: "executed", profile: "mcp-failure-semantics-v1", profileVersion: 1,
-    customer: proof.from, target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
+  const run = { runId: "capture-test", status: "executed", profile: profileName, profileVersion: 1,
+    customer: proof.from, ...structuredClone(profile.workedExample.request),
     execution: { status: "decidable" }, billing: { status: "authorized" } };
   await store.reserveVerificationRun(run, { paymentId: run.runId, authorization });
   const finalize = async () => service.finalizeExecution({ run: await store.getVerificationRun(run.runId),
@@ -235,9 +243,9 @@ async function captureFixture({ waitFails = false, noHash = false } = {}) {
     advance: () => { state.now += 300_000; } };
 }
 
-for (const failure of ["checkpoint", "wait", "broadcast-response"]) {
-  test(`X1d confirmed transfer survives ${failure}, preserving original verdict and transaction hash`, async () => {
-    const f = await captureFixture({ waitFails: failure === "wait", noHash: failure === "broadcast-response" });
+for (const { profileName, amountRaw } of capturePrices) for (const failure of ["checkpoint", "wait", "broadcast-response"]) {
+  test(`X1d ${amountRaw} confirmed transfer survives ${failure}, preserving original verdict and transaction hash`, async () => {
+    const f = await captureFixture({ profileName, waitFails: failure === "wait", noHash: failure === "broadcast-response" });
     const update = f.store.updateVerificationRun.bind(f.store);
     let failCheckpoint = failure === "checkpoint";
     f.store.updateVerificationRun = async (id, next) => {
@@ -260,7 +268,7 @@ for (const failure of ["checkpoint", "wait", "broadcast-response"]) {
     assert.deepEqual(completed.verdict, f.verdict);
     const receipt = await f.store.getWorkReceiptDocument(completed.receiptId);
     assert.equal(receipt.verdict.outcome, "approved");
-    assert.equal(receipt.intent.valueAtRisk.amountRaw, "250000");
+    assert.equal(receipt.intent.valueAtRisk.amountRaw, amountRaw);
     assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
   });
 }
@@ -517,19 +525,29 @@ test("X1d legacy unresolved captures surface one counted cached operator warning
   assert.equal(walks, 1);
 });
 
-test("X1d AuthorizationUsed requires Transfer to payTo; greater transferred value is sufficient", async () => {
-  for (const to of ["0x" + "9".repeat(40), "0x" + "2".repeat(40)]) {
-    const f = await captureFixture();
-    await f.checkpoint();
-    f.state.used = true;
-    f.state.events = [f.used()];
-    f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, "250001"])] };
-    const result = await f.finalize();
-    assert.equal(result.billing.status, to === f.proof.to ? "captured" : "not_captured");
-    if (to !== f.proof.to) assert.equal(result.verdict.reason, "payment_authorization_used_elsewhere");
-    assert.equal(f.state.transfers, 0);
+for (const { profileName, amountRaw } of capturePrices) {
+  for (const transferred of [amountRaw, String(BigInt(amountRaw) + 1n)]) {
+    test(`X1d ${amountRaw} AuthorizationUsed requires Transfer to payTo; ${transferred} is sufficient`, async () => {
+      for (const to of ["0x" + "9".repeat(40), "0x" + "2".repeat(40)]) {
+        const f = await captureFixture({ profileName });
+        await f.checkpoint();
+        f.state.used = true;
+        f.state.events = [f.used()];
+        f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, transferred])] };
+        const result = await f.finalize();
+        assert.equal(result.billing.status, to === f.proof.to ? "captured" : "not_captured");
+        if (to !== f.proof.to) assert.equal(result.verdict.reason, "payment_authorization_used_elsewhere");
+        else {
+          assert.equal(result.billing.amountRaw, amountRaw);
+          const receipt = await f.store.getWorkReceiptDocument(result.receiptId);
+          assert.equal(receipt.intent.valueAtRisk.amountRaw, amountRaw);
+          assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
+        }
+        assert.equal(f.state.transfers, 0);
+      }
+    });
   }
-});
+}
 
 test("X1d M7c Transfer to payTo from a different sender is not this run's payment", async () => {
   const f = await captureFixture();
@@ -561,24 +579,65 @@ test("X1d P6 cancellation after validBefore is terminal, unbilled and has no dec
   assert.equal(f.state.transfers, 0);
 });
 
-test("X1d P7 used authorization without a sufficient Transfer is terminal and unbilled", async () => {
-  for (const [to, amount] of [["0x" + "9".repeat(40), "250000"], ["0x" + "2".repeat(40), "1"]]) {
-    const f = await captureFixture();
-    f.gate.captureToken.transferWithAuthorization = async () => {
-      f.state.used = true;
-      f.state.events = [f.used()];
-      f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, amount])] };
-      throw Object.assign(new Error("authorization used"), { code: "CALL_EXCEPTION" });
-    };
-    const done = await f.finalize();
-    assert.equal(done.status, "complete");
-    assert.equal(done.verdict.reason, "payment_authorization_used_elsewhere");
-    assert.equal(done.verdict.outcome, "inconclusive");
-    assert.equal(done.billing.status, "not_captured");
-    assert.equal(f.state.transfers, 0);
-    assert.equal((await f.service.getRun(done.runId)).verdict.outcome, "inconclusive");
+for (const { profileName, amountRaw } of capturePrices) {
+  const payTo = "0x" + "2".repeat(40);
+  const transfers = [["0x" + "9".repeat(40), amountRaw], [payTo, "1"],
+    [payTo, String(BigInt(amountRaw) - 1n)]];
+  if (amountRaw === "5000000") transfers.push([payTo, "250000"]);
+  for (const [to, transferred] of transfers) {
+    test(`X1d P7 ${amountRaw} authorization with ${transferred} Transfer to ${to} is terminal and unbilled`, async () => {
+      const f = await captureFixture({ profileName });
+      f.gate.captureToken.transferWithAuthorization = async () => {
+        f.state.used = true;
+        f.state.events = [f.used()];
+        f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, transferred])] };
+        throw Object.assign(new Error("authorization used"), { code: "CALL_EXCEPTION" });
+      };
+      const done = await f.finalize();
+      assert.equal(done.status, "complete");
+      assert.equal(done.verdict.reason, "payment_authorization_used_elsewhere");
+      assert.equal(done.verdict.outcome, "inconclusive");
+      assert.equal(done.billing.status, "not_captured");
+      assert.equal(f.state.transfers, 0);
+      assert.equal((await f.service.getRun(done.runId)).verdict.outcome, "inconclusive");
+    });
   }
-});
+}
+
+for (const transferred of ["250000", "5000000"]) {
+  test(`X1d pre-deploy light authorization for 5000000 reconciles a ${transferred} Transfer using its stored price`, async () => {
+    const f = await captureFixture({ authorizedAmountRaw: "5000000" });
+    assert.equal(f.service.profileRegistry.get("mcp-failure-semantics-v1", 1).price.amountRaw, "250000");
+    const stored = await f.store.getVerificationRunAuthorization("capture-test");
+    assert.equal(stored.amountRaw, "5000000");
+    assert.equal(stored.authorization.value, "5000000");
+    await f.checkpoint();
+    f.state.used = true;
+    f.state.events = [f.used()];
+    f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, f.proof.to, transferred])] };
+    // The background finalizer must load the persisted authorization under the new registry.
+    const [done] = await f.service.finalizeAvailableRuns();
+    assert.equal(done.status, "complete");
+    assert.equal(done.profile, "mcp-failure-semantics-v1");
+    const receipt = await f.store.getWorkReceiptDocument(done.receiptId);
+    if (transferred === "250000") {
+      assert.equal(done.billing.status, "not_captured");
+      assert.equal(done.verdict.outcome, "inconclusive");
+      assert.equal(done.verdict.reason, "payment_authorization_used_elsewhere");
+      assert.equal(receipt.verdict.outcome, "inconclusive");
+    } else {
+      assert.equal(done.billing.status, "captured");
+      assert.equal(done.billing.amountRaw, "5000000");
+      assert.equal(done.billing.amount, "5");
+      assert.deepEqual(done.verdict, f.verdict);
+      assert.equal(receipt.intent.valueAtRisk.amountRaw, "5000000");
+      assert.equal(receipt.intent.valueAtRisk.amount, "5");
+    }
+    assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
+    assert.equal(f.state.transfers, 0);
+    assert.equal(f.state.evaluations, 0);
+  });
+}
 
 test("X1d P14 a shared authorization Transfer can be attributed only to its owner run", async () => {
   const f = await captureFixture();

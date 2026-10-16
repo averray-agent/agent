@@ -463,7 +463,7 @@ export function validateVerificationRunRequest(request, profileRegistry) {
   } catch (error) {
     if (error?.statusCode !== 400 && error?.code !== "verification_profile_not_found") throw error;
     const profiles = profileRegistry.list().map(({ ref }) => ref);
-    throw new ValidationError(`Reference a published profile: ${profiles.join(", ")}. ${error.message}`,
+    throw new ValidationError(`${error.message} Published profiles: ${profiles.join(", ")}.`,
       { ...error.details, profiles });
   }
   validateAgainstSchemaAll(
