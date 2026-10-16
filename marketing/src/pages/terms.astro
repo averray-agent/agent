@@ -1,0 +1,43 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import { VERIFY_BILLING_RULE } from "../../../mcp-server/src/core/verify-product-copy.js";
+import "../styles/global.css";
+---
+
+<BaseLayout title="Draft service terms — Averray" description="Draft terms for Averray Verify, pending operator approval." canonicalUrl="https://averray.com/terms/">
+  <main class="page">
+    <SiteNav />
+    <header class="page-hero">
+      <p class="eyebrow">Service terms</p>
+      <h1 class="page-hero__title">Terms for Verify.</h1>
+      <p class="page-hero__lede" data-terms-draft><strong>DRAFT — pending operator approval</strong></p>
+      <p>Proposed text for review by Pascal. These terms have not been approved for use. Draft dated 16 October 2026.</p>
+    </header>
+    <section class="section legal" data-terms-text>
+      <h2 class="section__title">Service</h2>
+      <p>Averray Verify runs a bounded check of your candidate result against the published profile and version you select. The profile defines the inputs, execution limits and success criteria. A completed run produces a result and a receipt. These terms concern Verify; worker jobs and deposit products are separate services.</p>
+
+      <h2 class="section__title">Payment</h2>
+      <p>Read the <a href="/pricing/">pricing page</a> and the requested profile's live 402 quote before authorizing payment. Verify uses USDC on Base through x402. An authorization permits capture of the quoted amount for that run after an approved or rejected verdict. A rejected verdict is a completed, billable check. A later price change does not change an existing authorization.</p>
+      <p data-verify-billing-rule>{VERIFY_BILLING_RULE}</p>
+
+      <h2 class="section__title">Your input</h2>
+      <p>Submit only material you have the right to provide and targets you are authorized to test. Do not submit secrets, private keys or personal data that should remain private. Run results and receipts can be publicly accessible; on-chain payment records are public. See the <a href="/privacy/">privacy policy</a> for data processing information.</p>
+
+      <h2 class="section__title">Verdicts are evidence, not a warranty</h2>
+      <p>A verdict reports what the selected check found within its stated scope, limits and execution conditions. It does not guarantee that code or a system is correct, secure, lawful or suitable for a particular use. You remain responsible for deciding whether the evidence is sufficient for your intended use and for any further review.</p>
+
+      <h2 class="section__title">Acceptable use</h2>
+      <p>Do not use Verify for unlawful activity, unauthorized access, attacks on others, or attempts to bypass payment, rate limits or sandbox isolation. We may refuse or restrict requests that threaten the service or other users. Such restrictions do not change the rule that inconclusive runs are not billed.</p>
+
+      <h2 class="section__title">Changes</h2>
+      <p>Profiles, prices and service availability may change. Review the published profile and quote before each new authorization. Changes to these terms will be published here with an updated date; they do not rewrite the quoted payment amount or recorded result of a previous run.</p>
+
+      <h2 class="section__title">Operator and applicable law</h2>
+      <p>The operator and contact details are listed in the <a href="/imprint/">imprint</a>. Swiss law governs these proposed terms, subject to applicable mandatory law. Nothing here excludes rights or liability that cannot lawfully be excluded.</p>
+    </section>
+    <SiteFooter />
+  </main>
+</BaseLayout>

@@ -54,6 +54,120 @@
     }
   ],
   "paths": {
+    "/robots.txt": {
+      "get": {
+        "operationId": "getRobots",
+        "summary": "Crawler policy",
+        "tags": [
+          "Discovery"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Allows public crawling; excludes /admin/.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pricing": {
+      "get": {
+        "operationId": "getPricing",
+        "summary": "Published per-profile Verify prices",
+        "tags": [
+          "Discovery"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Generated from the profile registry. Read the requested profile’s live 402 quote before authorizing a run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "verify",
+                    "page"
+                  ],
+                  "properties": {
+                    "verify": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "profile",
+                          "amount",
+                          "asset",
+                          "network",
+                          "billingRule"
+                        ],
+                        "properties": {
+                          "profile": {
+                            "type": "string"
+                          },
+                          "amount": {
+                            "type": "string"
+                          },
+                          "asset": {
+                            "type": "string"
+                          },
+                          "network": {
+                            "type": "string"
+                          },
+                          "billingRule": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/terms": {
+      "get": {
+        "operationId": "getTerms",
+        "summary": "Redirect to draft service terms",
+        "tags": [
+          "Discovery"
+        ],
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "DRAFT — pending operator approval. Redirect to the public terms page.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "const": "https://averray.com/terms/"
+                }
+              }
+            },
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [

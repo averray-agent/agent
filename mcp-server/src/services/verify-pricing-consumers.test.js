@@ -48,6 +48,11 @@ test("pricing: the marketing reader consumes every registry price, including cha
 test("pricing: documentation and discovery consumers refer to live registry-backed prices without literals", () => {
   const consumers = [
     "docs/VERIFY_PR_GATE.md",
+    "docs/VERIFY_SITE_SIGNALS.md",
+    "marketing/src/pages/pricing.astro",
+    "marketing/src/pages/terms.astro",
+    "marketing/src/content/llms.txt",
+    "mcp-server/src/core/verify-pricing.js",
     "marketing/src/pages/verify.astro",
     "marketing/src/pages/verify-listing.json.ts",
     "marketing/public/verify-reader.js",

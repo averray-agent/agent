@@ -646,6 +646,21 @@
   "publicEndpoints": [
     {
       "method": "GET",
+      "path": "/robots.txt",
+      "description": "Crawler policy and public-site sitemap; admin paths excluded."
+    },
+    {
+      "method": "GET",
+      "path": "/pricing",
+      "description": "Verify prices projected from the published profile registry and a link to the pricing page."
+    },
+    {
+      "method": "GET",
+      "path": "/terms",
+      "description": "Redirect to the public service terms (draft pending operator approval)."
+    },
+    {
+      "method": "GET",
       "path": "/openapi.json",
       "description": "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded."
     },

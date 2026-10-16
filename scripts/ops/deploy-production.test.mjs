@@ -686,6 +686,9 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   // regression stayed live for 10 days.
   assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
   assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/pricing\/ matches built site\/pricing\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/terms\/ matches built site\/terms\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/llms\.txt matches built site\/llms\.txt/u);
   assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
   assert.match(run.stdout, /Served .*\/transparency\/ matches built site\/transparency\/index\.html/u);
   assert.match(run.stdout, /Served .*\/transparency-reader\.js matches built site\/transparency-reader\.js/u);
@@ -2130,6 +2133,9 @@ async function makeSiteFixture() {
     "  */console-stream.js) name=console-stream.js ;;",
     "  */transparency/) name=transparency/index.html ;;",
     "  */transparency-reader.js) name=transparency-reader.js ;;",
+    "  */pricing/) name=pricing/index.html ;;",
+    "  */terms/) name=terms/index.html ;;",
+    "  */llms.txt) name=llms.txt ;;",
     "  */verify/) name=verify/index.html ;;",
     "  */why-two-chains/) name=why-two-chains/index.html ;;",
     "  */verify-reader.js) name=verify-reader.js ;;",
@@ -2152,6 +2158,11 @@ async function makeSiteFixture() {
   git(appRoot, "config", "user.name", "Deploy Test");
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
+  for (const page of ["pricing", "terms"]) {
+    await mkdir(join(appRoot, "site", page), { recursive: true });
+    await writeFile(join(appRoot, "site", page, "index.html"), `<title>${page}</title> fresh build`);
+  }
+  await writeFile(join(appRoot, "site/llms.txt"), "Pricing and draft terms links\n");
   await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
   await writeFile(join(appRoot, "site/transparency/index.html"), "<title>Transparency</title> fresh build\n");
   await writeFile(join(appRoot, "site/transparency-reader.js"), "// fresh transparency reader\n");

@@ -80,6 +80,9 @@ export function resolveHubNetwork(chainId) {
 const withDefaultGetMethod = (entries) => entries.map((entry) => ({ method: "GET", ...entry }));
 
 const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
+  { path: "/robots.txt", description: "Crawler policy and public-site sitemap; admin paths excluded." },
+  { path: "/pricing", description: "Verify prices projected from the published profile registry and a link to the pricing page." },
+  { path: "/terms", description: "Redirect to the public service terms (draft pending operator approval)." },
   { path: "/openapi.json", description: "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded." },
   { path: "/agent-tools.json", description: "Directory-safe discovery manifest." },
   { path: "/.well-known/agent-tools.json", description: "Directory-safe discovery manifest." },
