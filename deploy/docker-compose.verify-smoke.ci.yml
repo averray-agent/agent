@@ -1,9 +1,36 @@
-# CI-only override for docker-compose.verify-smoke.yml. CI pre-pulls redis by
-# digest through scripts/ops/pull-ci-image.sh (mirror.gcr.io, then ECR Public),
-# so an exhausted anonymous registry quota cannot fail the smoke from an
-# implicit `compose up` pull. `never` makes a missing alias fail loudly instead
-# of resolving the unqualified name against Docker Hub.
+# CI-only override for docker-compose.verify-smoke.yml. CI pre-pulls every
+# public.ecr.aws image this stack needs by digest through
+# scripts/ops/pull-ci-image.sh (mirror.gcr.io, then ECR Public), so an
+# exhausted anonymous registry quota cannot fail the smoke from an implicit
+# pull. Production Dockerfile FROM lines stay untouched: named build contexts
+# replace each FROM ref with the helper's local averray-ci/ alias, which the
+# docker driver resolves locally (measured on Docker 28.0.4, ECR blackholed).
+# A digest-pinned FROM is NOT resolved from a local copy pulled under another
+# registry name, hence the contexts. Redis gets `pull_policy: never` so a
+# missing alias fails loudly instead of resolving against Docker Hub.
 services:
   verify-smoke-redis:
     image: averray-ci/redis:7-alpine
     pull_policy: never
+
+  verify-smoke-proxy:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim
+
+  verify-smoke-proxy-guard:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/docker:29.1.3-cli@sha256:4fa0ee1f3a7e4354c4ea34558b6d4ee32859baf4973d4c8ccc8e7fe3dd730c04: docker-image://averray-ci/docker:29.1.3-cli
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim
+
+  verify-smoke-runner:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/docker:29.1.3-cli@sha256:4fa0ee1f3a7e4354c4ea34558b6d4ee32859baf4973d4c8ccc8e7fe3dd730c04: docker-image://averray-ci/docker:29.1.3-cli
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim
+
+  verify-smoke-backend:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim
