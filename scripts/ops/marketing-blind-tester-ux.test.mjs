@@ -44,7 +44,7 @@ test("QA8 marketing exposes the canonical MCP install door and copy-safe snippet
     readFile(new URL("marketing/src/navigation.mjs", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/components/CopySnippet.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/styles/global.css", REPO_ROOT), "utf8"),
-    readFile(new URL("site/llms.txt", REPO_ROOT), "utf8")
+    readFile(new URL("marketing/src/content/llms.txt", REPO_ROOT), "utf8")
   ]);
 
   assert.match(builders, /<section class="section" id="install">/u);
@@ -278,7 +278,7 @@ test("marketing and the public orientation mirror do not advertise retired strat
   const sources = await Promise.all([
     readFile(new URL("marketing/src/pages/agents.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
-    readFile(new URL("site/llms.txt", REPO_ROOT), "utf8")
+    readFile(new URL("marketing/src/content/llms.txt", REPO_ROOT), "utf8")
   ]);
 
   for (const source of sources) {

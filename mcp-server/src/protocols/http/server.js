@@ -868,6 +868,7 @@ const handleEventRoute = createEventRoutes({
 });
 
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
+  listVerificationProfiles: () => verificationRunService.listProfiles(),
   authConfig,
   buildDiscoveryManifest,
   getX402Discovery: () => buildX402DiscoveryDocument({

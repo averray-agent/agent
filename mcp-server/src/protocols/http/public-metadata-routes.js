@@ -5,6 +5,7 @@ import {
 } from "../../core/earnings-door-copy.js";
 import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
 import { buildDiscoveryAlias, DISCOVERY_ALIAS_PATHS } from "../../core/discovery-aliases.js";
+import { buildVerifyPricing, buildVerifySiteSignalsLlmsSection } from "../../core/verify-pricing.js";
 import { readPublicOpenApi } from "../../core/public-openapi.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
@@ -21,6 +22,8 @@ const ROOT_ENDPOINTS = [
   "/agent-tools.json",
   ...DISCOVERY_ALIAS_PATHS,
   "/openapi.json",
+  "/robots.txt",
+  "/pricing",
   "/.well-known/x402",
   "/verify/profiles",
   "/verify/runs",
@@ -119,6 +122,8 @@ Agent-native work, escrow, identity, and treasury infrastructure where software 
 
 ${buildVerifyLlmsSection({ apiUrl })}
 
+${buildVerifySiteSignalsLlmsSection({ apiUrl })}
+
 ## Start from zero
 
 No wallet? Generate any EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered. A fresh-wallet run earned 0.40 USDC while its nonce remained 0.
@@ -168,6 +173,7 @@ export function createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
   getX402Discovery,
+  listVerificationProfiles,
   minimumRewardUsdc,
   publicBaseUrl,
   posterOnboardingService,
@@ -227,6 +233,16 @@ export function createPublicMetadataRoutes({
 
     if (request.method === "GET" && pathname === "/openapi.json") {
       respond(response, 200, await readPublicOpenApi(), { "cache-control": "public, max-age=300" });
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/robots.txt") {
+      respondText(response, 200, "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/pricing") {
+      respond(response, 200, buildVerifyPricing(listVerificationProfiles?.()));
       return true;
     }
 

@@ -77,7 +77,7 @@ test("agent playbooks never pair x402 with Hub USDC or asset 1337", async () => 
 
 test("both agent playbooks are reachable from llms.txt, builders, and discovery", async () => {
   const [llms, builders] = await Promise.all([
-    readFile(new URL("site/llms.txt", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/content/llms.txt", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8")
   ]);
   const manifest = buildDiscoveryManifest();
