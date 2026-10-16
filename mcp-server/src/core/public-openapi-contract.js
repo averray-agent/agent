@@ -48,7 +48,7 @@ export const OPENAPI_INVENTORY_EXCLUSIONS = Object.freeze({
 // predates the per-id job route). These are checked as operations, not merely
 // path strings, so documenting POST cannot silently stand in for GET.
 const PUBLIC_COMPANIONS = [
-  ["GET", "/robots.txt"], ["GET", "/pricing"], ["GET", "/terms"],
+  ["GET", "/robots.txt"], ["GET", "/pricing"],
   ["GET", "/"], ["GET", "/openapi.json"], ["GET", "/mcp"],
   ["GET", "/agent-tools.json"], ["GET", "/.well-known/agent-tools.json"],
   ["GET", "/status/providers"], ["GET", "/transparency"],

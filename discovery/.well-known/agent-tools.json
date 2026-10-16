@@ -656,11 +656,6 @@
     },
     {
       "method": "GET",
-      "path": "/terms",
-      "description": "Redirect to the public service terms (draft pending operator approval)."
-    },
-    {
-      "method": "GET",
       "path": "/openapi.json",
       "description": "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded."
     },

@@ -100,7 +100,7 @@ test("site navigation — the current page is rendered without a self-link", asy
   }
 });
 
-test("site navigation — footer includes pricing and terms while retaining external destinations", async () => {
+test("site navigation — footer includes pricing while retaining external destinations", async () => {
   const [footer, nav] = await Promise.all([readFile(FOOTER, "utf8"), readFile(NAV, "utf8")]);
   const footerHrefs = [...footer.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
 
@@ -111,7 +111,6 @@ test("site navigation — footer includes pricing and terms while retaining exte
     "/builders/",
     "/why-two-chains/",
     "/pricing/",
-    "/terms/",
     "/privacy/",
     "/imprint/",
     "https://x.com/Averray_Agents",

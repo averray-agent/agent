@@ -349,7 +349,7 @@ test("onboarding exposes route-not-live idle allocation without soliciting conse
 
 test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirror", async () => {
   const { calls, response, route } = makeHarness();
-  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+  const siteLlms = readFileSync(new URL("../../../../marketing/src/content/llms.txt", import.meta.url), "utf8");
 
   assert.equal(await route({
     request: { method: "GET" },
@@ -391,7 +391,7 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
 
 test("Verify leads both llms mirrors with discovery-priced Base payment and public results", async () => {
   const { response, route } = makeHarness();
-  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+  const siteLlms = readFileSync(new URL("../../../../marketing/src/content/llms.txt", import.meta.url), "utf8");
   await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
   const expectedSection = buildVerifyLlmsSection({ apiUrl: "https://api.averray.com" }).trim();
 
@@ -509,27 +509,23 @@ test("site signals: pricing projects every registry field, including changed pri
   }
 });
 
-test("site signals: robots permits public crawling, excludes admin, and terms redirects", async () => {
+test("site signals: robots permits public crawling, and excludes admin", async () => {
   const { route, response } = makeHarness();
   assert.equal(await route({ request: { method: "GET" }, response, pathname: "/robots.txt" }), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
   assert.equal(response.body, "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
-  assert.equal(await route({ request: { method: "GET" }, response, pathname: "/terms" }), true);
-  assert.equal(response.statusCode, 302);
-  assert.equal(response.headers.location, "https://averray.com/terms/");
-  assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
-  for (const pathname of ["/robots.txt", "/pricing", "/terms"]) {
+  for (const pathname of ["/robots.txt", "/pricing"]) {
     assert.equal(await route({ request: { method: "POST" }, response, pathname }), false);
   }
 });
 
-test("site signals: root, metrics, discovery and OpenAPI retain all three public reads", async () => {
+test("site signals: root, metrics, discovery and OpenAPI retain both public reads", async () => {
   const { route, response } = makeHarness();
   await route({ request: { method: "GET" }, response, pathname: "/" });
   const manifest = buildDiscoveryManifest();
   const document = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
-  for (const path of ["/robots.txt", "/pricing", "/terms"]) {
+  for (const path of ["/robots.txt", "/pricing"]) {
     assert.ok(response.body.endpoints.includes(path), `root: ${path}`);
     assert.equal(metricPathLabel(path), path, `metrics: ${path}`);
     assert.ok(manifest.publicEndpoints.some((p) => p.method === "GET" && p.path === path), `discovery: ${path}`);
@@ -541,14 +537,13 @@ test("site signals: root, metrics, discovery and OpenAPI retain all three public
   }
   assert.ok(document.paths["/robots.txt"].get.responses["200"].content["text/plain"]);
   assert.ok(document.paths["/pricing"].get.responses["200"].content["application/json"]);
-  assert.equal(document.paths["/terms"].get.responses["302"].headers.Location.schema.const, "https://averray.com/terms/");
 });
 
-test("site signals: API llms includes pricing and draft terms links on the configured host", async () => {
+test("site signals: API llms includes pricing links on the configured host", async () => {
   const { route, response } = makeHarness({ publicBaseUrl: "https://api.example.test/" });
   await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
-  for (const required of ["## Pricing", "## Terms", "https://api.example.test/pricing", "https://api.example.test/terms",
-    "https://averray.com/pricing/", "https://averray.com/terms/", "DRAFT — pending operator approval", "Inconclusive runs are not billed."]) {
+  for (const required of ["## Pricing", "https://api.example.test/pricing",
+    "https://averray.com/pricing/", "No verdict, no charge. Inconclusive runs are not billed."]) {
     assert.ok(response.body.includes(required), required);
   }
 });

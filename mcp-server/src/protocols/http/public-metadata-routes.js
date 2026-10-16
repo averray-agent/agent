@@ -5,7 +5,7 @@ import {
 } from "../../core/earnings-door-copy.js";
 import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
 import { buildDiscoveryAlias, DISCOVERY_ALIAS_PATHS } from "../../core/discovery-aliases.js";
-import { buildVerifyPricing, buildVerifySiteSignalsLlmsSection, VERIFY_TERMS_PAGE } from "../../core/verify-pricing.js";
+import { buildVerifyPricing, buildVerifySiteSignalsLlmsSection } from "../../core/verify-pricing.js";
 import { readPublicOpenApi } from "../../core/public-openapi.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
@@ -24,7 +24,6 @@ const ROOT_ENDPOINTS = [
   "/openapi.json",
   "/robots.txt",
   "/pricing",
-  "/terms",
   "/.well-known/x402",
   "/verify/profiles",
   "/verify/runs",
@@ -244,11 +243,6 @@ export function createPublicMetadataRoutes({
 
     if (request.method === "GET" && pathname === "/pricing") {
       respond(response, 200, buildVerifyPricing(listVerificationProfiles?.()));
-      return true;
-    }
-
-    if (request.method === "GET" && pathname === "/terms") {
-      respondText(response, 302, "", { location: VERIFY_TERMS_PAGE });
       return true;
     }
 

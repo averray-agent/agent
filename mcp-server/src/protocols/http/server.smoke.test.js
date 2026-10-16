@@ -2927,10 +2927,10 @@ test("http smoke: later wallets still link when the trail flush interval has not
   } finally { await stop(child); }
 });
 
-test("http smoke: site signals expose registry prices, robots and a terms redirect without auth", SMOKE_TEST_OPTIONS, async () => {
+test("http smoke: site signals expose registry prices and robots without auth", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
-    const [pricing, robots, terms, profileResponse] = await Promise.all([
-      fetch(`${base}/pricing`), fetch(`${base}/robots.txt`), fetch(`${base}/terms`, { redirect: "manual" }),
+    const [pricing, robots, profileResponse] = await Promise.all([
+      fetch(`${base}/pricing`), fetch(`${base}/robots.txt`),
       fetch(`${base}/verify/profiles`)
     ]);
     assert.equal(pricing.status, 200);
@@ -2944,8 +2944,5 @@ test("http smoke: site signals expose registry prices, robots and a terms redire
     assert.equal(robots.status, 200);
     assert.equal(robots.headers.get("content-type"), "text/plain; charset=utf-8");
     assert.equal(await robots.text(), "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
-    assert.equal(terms.status, 302);
-    assert.equal(terms.headers.get("location"), "https://averray.com/terms/");
-    assert.equal(terms.headers.get("content-type"), "text/plain; charset=utf-8");
   });
 });

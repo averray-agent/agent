@@ -50,7 +50,6 @@ test("pricing: documentation and discovery consumers refer to live registry-back
     "docs/VERIFY_PR_GATE.md",
     "docs/VERIFY_SITE_SIGNALS.md",
     "marketing/src/pages/pricing.astro",
-    "marketing/src/pages/terms.astro",
     "marketing/src/content/llms.txt",
     "mcp-server/src/core/verify-pricing.js",
     "marketing/src/pages/verify.astro",

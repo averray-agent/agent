@@ -97,7 +97,7 @@ test("both llms surfaces and discovery mirrors link the same served OpenAPI URL"
   assert.equal(manifest.openapi, expected);
   assert.ok(manifest.publicEndpoints.some(({ method, path }) => method === "GET" && path === "/openapi.json"));
   assert.ok(buildAgentLlmsText().includes(expected));
-  assert.ok((await readFile(new URL("../../../site/llms.txt", import.meta.url), "utf8")).includes(expected));
+  assert.ok((await readFile(new URL("../../../marketing/src/content/llms.txt", import.meta.url), "utf8")).includes(expected));
   for (const path of ["discovery/agent-tools.json", "discovery/.well-known/agent-tools.json", "site/.well-known/agent-tools.json"]) {
     assert.equal(JSON.parse(await readFile(new URL(`../../../${path}`, import.meta.url), "utf8")).openapi, expected);
   }

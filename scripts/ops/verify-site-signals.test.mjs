@@ -48,25 +48,9 @@ test("site signals: built pricing equals registry, including visible numbers and
   const document = new JSDOM(html).window.document;
   document.querySelector("[data-verify-price-table] tbody td").textContent = "999 USDC";
   assert.throws(() => assertPrices(document.documentElement.outerHTML), assert.AssertionError);
-  for (const path of ["marketing/src/pages/pricing.astro", "marketing/src/pages/terms.astro", "mcp-server/src/core/verify-pricing.js"]) {
+  for (const path of ["marketing/src/pages/pricing.astro", "mcp-server/src/core/verify-pricing.js"]) {
     assert.doesNotMatch(await read(path), /\b\d+(?:\.\d+)?\s*USDC\b|\b(?:5000000|250000)\b/iu, path);
   }
-});
-
-test("site signals: terms stays visibly draft and includes the operator review outline", async () => {
-  const document = new JSDOM(await built("terms/index.html")).window.document;
-  const draft = document.querySelector("[data-terms-draft]");
-  assert.equal(draft.textContent.trim(), "DRAFT — pending operator approval");
-  for (let element = draft; element; element = element.parentElement) assert.equal(element.hidden, false);
-  const text = document.querySelector("[data-terms-text]").textContent;
-  for (const heading of ["Service", "Payment", "Your input", "Verdicts are evidence, not a warranty", "Acceptable use", "Changes", "Operator and applicable law"]) {
-    assert.ok([...document.querySelectorAll("h2")].some((h) => h.textContent === heading), heading);
-  }
-  assert.match(text, /Swiss law/u);
-  assert.match(text, /applicable mandatory law/u);
-  assert.match(text, /Inconclusive runs are not billed/u);
-  assert.ok(document.querySelector('[data-terms-text] a[href="/imprint/"]'));
-  assert.equal(document.querySelector('link[rel="canonical"]').href, "https://averray.com/terms/");
 });
 
 test("site signals: sitemap, llms, navigation and both deployment allow-lists include new pages", async () => {
@@ -74,16 +58,19 @@ test("site signals: sitemap, llms, navigation and both deployment allow-lists in
     built("sitemap.xml"), built("llms.txt"), read("scripts/sync-marketing-site.mjs"), read("scripts/ops/deploy-production.sh")
   ]);
   const home = new JSDOM(await built("index.html")).window.document;
-  for (const page of ["pricing", "terms"]) {
+  for (const page of ["pricing"]) {
     assert.ok(sitemap.includes(`<loc>https://averray.com/${page}/</loc>`), `sitemap: ${page}`);
     assert.ok(llms.includes(`https://averray.com/${page}/`), `llms: ${page}`);
     assert.ok(home.querySelector(`footer a[href="/${page}/"]`), `footer: ${page}`);
     assert.ok(sync.includes(`"${page}/index.html"`), `sync allow-list: ${page}`);
     assert.ok(deploy.includes(`"${page}/index.html /${page}/"`), `deployment allow-list: ${page}`);
   }
+  assert.doesNotMatch(sitemap + llms + home.body.textContent, /\/terms\/|## Terms|DRAFT — pending operator approval|not approved/iu);
   assert.ok(sync.includes('"llms.txt"'), "generated llms sync");
   assert.ok(deploy.includes('"llms.txt /llms.txt"'), "deployed llms byte check");
-  for (const required of ["## Pricing", "## Terms", "https://api.averray.com/pricing", "https://api.averray.com/terms", "DRAFT — pending operator approval"]) {
+  for (const required of ["## Pricing", "https://api.averray.com/pricing", "https://api.averray.com/openapi.json",
+    "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-worker/SKILL.md",
+    "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-poster/SKILL.md"]) {
     assert.ok(llms.includes(required), required);
   }
 });

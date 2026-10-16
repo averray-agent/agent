@@ -138,36 +138,6 @@
         }
       }
     },
-    "/terms": {
-      "get": {
-        "operationId": "getTerms",
-        "summary": "Redirect to draft service terms",
-        "tags": [
-          "Discovery"
-        ],
-        "security": [],
-        "responses": {
-          "302": {
-            "description": "DRAFT — pending operator approval. Redirect to the public terms page.",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string",
-                  "const": "https://averray.com/terms/"
-                }
-              }
-            },
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/health": {
       "get": {
         "tags": [
