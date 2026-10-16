@@ -54,7 +54,11 @@ for (const [label, body] of [["no body", undefined], ["empty object", {}]]) {
     const example = h.profiles.get("mcp-failure-semantics-v1", 1).workedExample.request;
     const valid = await h.post(example);
     assert.equal(actual.statusCode, 402);
-    assert.deepEqual(actual.body, valid.body);
+    assert.deepEqual(actual.body.accepts[0], valid.body.accepts[0]);
+    assert.equal(actual.body.accepts.length, 3);
+    for (const profile of h.profiles.list()) {
+      assert.equal(actual.body.accepts.find((entry) => entry.extra.profile === profile.ref).amount, profile.price.amountRaw);
+    }
     assert.equal(actual.body.x402Version, 2);
     assert.equal(actual.body.accepts[0].network, "eip155:8453");
     assert.equal(actual.body.accepts[0].amount, h.profiles.get(example.profile, 1).price.amountRaw);
@@ -310,4 +314,18 @@ test("GET /verify/runs/:runId is public and polls by opaque run id", async () =>
       token: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
     }
   });
+});
+
+test("pricing: missing or unknown profile errors name every published profile without a default quote", async () => {
+  const h = discoveryHarness();
+  for (const body of [{ target: {}, inputs: {} }, { profile: "unknown", profileVersion: 1, target: {}, inputs: {} }]) {
+    await assert.rejects(h.post(body), (error) => {
+      assert.equal(error.statusCode, 400);
+      for (const profile of h.profiles.list()) assert.ok(error.message.includes(profile.ref));
+      assert.deepEqual(error.details.profiles, h.profiles.list().map((p) => p.ref));
+      assert.equal(error.details.paymentRequired, undefined);
+      return true;
+    });
+  }
+  assert.equal(h.calls.authorize, 0);
 });

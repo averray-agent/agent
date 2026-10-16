@@ -128,7 +128,7 @@ for (const authorizationAvailable of [true, false]) {
       customer: "0x" + "1".repeat(40), target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
       execution: { status: "decidable" }
     };
-    const authorization = { id: "paid" };
+    const authorization = { id: "paid", ...profiles.get(run.profile, 1).price };
     await store.reserveVerificationRun(run, { paymentId: "paid", authorization });
     const profile = profiles.get(run.profile, 1);
     await assert.rejects(service.finalizeExecution({ run, profile, authorization, execution: run.execution }), /KMS unavailable/);
@@ -170,7 +170,7 @@ async function captureFixture({ waitFails = false, noHash = false } = {}) {
   const profiles = new VerificationProfileRegistry();
   const hash = "0x" + "a".repeat(64);
   const asset = "0x" + "5".repeat(40);
-  const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: "5000000",
+  const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: profiles.get("mcp-failure-semantics-v1", 1).price.amountRaw,
     validAfter: "0", validBefore: "9999999999", nonce: "0x" + "3".repeat(64) };
   const state = { used: false, transfers: 0, releases: 0, evaluations: 0, receipt: null, events: [], logs: [], waitFails, noHash,
     head: 101, reads: 0, now: Date.parse("2026-10-09T16:00:00Z") };
@@ -214,7 +214,7 @@ async function captureFixture({ waitFails = false, noHash = false } = {}) {
     } }
   });
   gate.release = async () => { state.releases++; };
-  const authorization = { id: "paid", customer: proof.from, authorization: proof, authorizedAtBlock: 100,
+  const authorization = { id: "paid", ...profiles.get("mcp-failure-semantics-v1", 1).price, customer: proof.from, authorization: proof, authorizedAtBlock: 100,
     signature: Signature.from({ r: "0x" + "1".repeat(64), s: "0x" + "2".repeat(64), v: 27 }).serialized };
   const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate,
     badgeReceiptSigner: f.signer, logger: { warn: (...args) => state.logs.push(args) }, now: () => new Date(state.now) });
@@ -260,7 +260,7 @@ for (const failure of ["checkpoint", "wait", "broadcast-response"]) {
     assert.deepEqual(completed.verdict, f.verdict);
     const receipt = await f.store.getWorkReceiptDocument(completed.receiptId);
     assert.equal(receipt.verdict.outcome, "approved");
-    assert.equal(receipt.intent.valueAtRisk.amountRaw, "5000000");
+    assert.equal(receipt.intent.valueAtRisk.amountRaw, "250000");
     assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
   });
 }
@@ -523,7 +523,7 @@ test("X1d AuthorizationUsed requires Transfer to payTo; greater transferred valu
     await f.checkpoint();
     f.state.used = true;
     f.state.events = [f.used()];
-    f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, "5000001"])] };
+    f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, to, "250001"])] };
     const result = await f.finalize();
     assert.equal(result.billing.status, to === f.proof.to ? "captured" : "not_captured");
     if (to !== f.proof.to) assert.equal(result.verdict.reason, "payment_authorization_used_elsewhere");
@@ -562,7 +562,7 @@ test("X1d P6 cancellation after validBefore is terminal, unbilled and has no dec
 });
 
 test("X1d P7 used authorization without a sufficient Transfer is terminal and unbilled", async () => {
-  for (const [to, amount] of [["0x" + "9".repeat(40), "5000000"], ["0x" + "2".repeat(40), "1"]]) {
+  for (const [to, amount] of [["0x" + "9".repeat(40), "250000"], ["0x" + "2".repeat(40), "1"]]) {
     const f = await captureFixture();
     f.gate.captureToken.transferWithAuthorization = async () => {
       f.state.used = true;

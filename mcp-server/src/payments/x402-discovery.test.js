@@ -82,6 +82,11 @@ test("x402 discovery requirements are byte-equal to the live Verify 402 for the 
   assert.equal(resource.inputContract.url, "https://api.averray.com/verify/profiles");
   assert.equal(resource.maxAmountRequired, "5000000");
   assert.equal(resource.accepts.length, profiles.length);
+  assert.deepEqual(Object.fromEntries(resource.accepts.map((entry) => [entry.extra.profile, entry.amount])), {
+    "git-patch-tests-v1@1": "5000000",
+    "mcp-failure-semantics-v1@1": "250000",
+    "structured-output-evidence-v1@1": "250000"
+  });
   assert.equal(resource.accepts[0].extra.profile, "mcp-failure-semantics-v1@1");
 
   for (const profile of profiles) {

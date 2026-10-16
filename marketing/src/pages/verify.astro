@@ -65,7 +65,7 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
         <p class="eyebrow">What it costs</p>
         <h2 class="section__title" id="verify-price">The price comes from the terms your agent reads.</h2>
         <p class="section__aside">
-          No price is embedded in this page's markup. On every visit, the browser reads x402 discovery and renders the first accepted payment requirement for the Verify run resource.
+          No price is embedded in this page's markup. On every visit, the browser reads x402 discovery and renders each profile’s accepted payment requirement for the Verify run resource.
         </p>
         <p data-verify-pricing-status>
           See live pricing in <a href={DISCOVERY_URL}>x402 discovery</a>.
@@ -77,6 +77,7 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
           <article class="pillar">
             <p class="pillar__eyebrow">Per run</p>
             <h3 class="pillar__title" data-verify-price></h3>
+            <ul class="pillar__body" data-verify-prices></ul>
             <p class="pillar__body" data-verify-protocol></p>
           </article>
           <article class="pillar">
@@ -148,5 +149,5 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
     <SiteFooter />
   </main>
   <script is:inline src="/reader-fetch.js?v=20260823"></script>
-  <script is:inline src="/verify-reader.js?v=20261009"></script>
+  <script is:inline src="/verify-reader.js?v=20261016"></script>
 </BaseLayout>

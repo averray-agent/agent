@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { MemoryStateStore } from "../core/state-store.js";
-import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import { VerificationProfileRegistry, VERIFY_PROFILE_PRICES } from "./verification-profile-registry.js";
 import { decorateVerificationRunPresentation } from "../core/verdict-presentation.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import {
@@ -47,13 +47,13 @@ function paymentGate() {
   const calls = { authorize: 0, capture: 0, release: 0 };
   return {
     calls,
-    async authorize({ paymentProof }) {
+    async authorize({ paymentProof, price }) {
       calls.authorize += 1;
       if (!paymentProof) return new UnavailableVerificationPaymentGate().authorize({});
       return {
         id: `authorization:${paymentProof}`,
         customer: CUSTOMER,
-        amountRaw: "5000000",
+        amountRaw: price.amountRaw,
         asset: "USDC",
         network: "eip155:8453"
       };
@@ -261,14 +261,7 @@ test("every published Verify worked example passes validation without trial call
       () => validateVerificationRunRequest(profile.workedExample.request, profileRegistry),
       `${profile.ref} worked example must validate as published`
     );
-    assert.deepEqual(profile.price, {
-      amount: "5",
-      amountRaw: "5000000",
-      asset: "USDC",
-      decimals: 6,
-      network: "eip155:8453",
-      billingRule: "inconclusive_not_billed"
-    });
+    assert.deepEqual(profile.price, VERIFY_PROFILE_PRICES[profile.name]);
   }
 });
 
@@ -469,4 +462,59 @@ test("standalone verification completes with a gateway double whose every method
   assert.equal(presented.billing.status, "captured", "Verify PASS must retain captured billing truth");
   assert.equal(presented.assetContext.chainName, "Base");
   assert.equal(Object.hasOwn(presented, "settlement"), false, "Verify PASS is billed, never job-settled");
+});
+
+for (const profile of new VerificationProfileRegistry().list()) {
+  for (const outcome of ["approved", "rejected", "inconclusive"]) {
+    test(`pricing: ${profile.ref} ${outcome} records the quoted amount in billing and receipt`, async () => {
+      const context = harness();
+      const queued = await context.service.createRun({ ...profile.workedExample.request, paymentProof: "priced-proof" });
+      let captured;
+      context.gate.capture = async ({ authorization }) => {
+        context.gate.calls.capture++;
+        captured = authorization.amountRaw;
+        return { transactionHash: `0x${"4".repeat(64)}` };
+      };
+      context.service.evaluatePinnedProfile = async () => ({ outcome, reasonCode: outcome === "approved" ? "PASS" : "FAIL" });
+      await context.stateStore.updateVerificationRun(queued.runId, { ...queued, status: "executed", execution:
+        outcome === "inconclusive" ? { status: "inconclusive", reason: "runner_fault" } : { status: "decidable" } });
+      const [completed] = await context.service.finalizeAvailableRuns();
+      const receipt = await context.stateStore.getWorkReceiptDocument(completed.receiptId);
+      assert.equal(completed.verdict.outcome, outcome);
+      const billed = outcome !== "inconclusive";
+      assert.equal(completed.billing.status, billed ? "captured" : "not_captured");
+      assert.equal(completed.billing.amountRaw, billed ? profile.price.amountRaw : "0");
+      assert.equal(receipt.intent.valueAtRisk.amountRaw, billed ? profile.price.amountRaw : "0");
+      assert.equal(receipt.intent.valueAtRisk.amount, billed ? profile.price.amount : "0");
+      assert.equal(captured, billed ? profile.price.amountRaw : undefined);
+      assert.equal(context.gate.calls.capture, billed ? 1 : 0);
+      assert.equal(context.gate.calls.release, billed ? 0 : 1);
+    });
+  }
+}
+
+test("pricing: finalization after a registry price change preserves the accepted quote", async () => {
+  // Model an already-authorized light run from before the price reduction.
+  const oldProfiles = new VerificationProfileRegistry().list().map((p) => ({
+    ...p, price: VERIFY_PROFILE_PRICES["git-patch-tests-v1"]
+  }));
+  const context = harness({ profileRegistry: new VerificationProfileRegistry({ profiles: oldProfiles }) });
+  const queued = await context.service.createRun(mcpRequest());
+  const originalPrice = context.profileRegistry.get(queued.profile, 1).price;
+  context.service.profileRegistry = new VerificationProfileRegistry();
+  context.service.evaluatePinnedProfile = async () => ({ outcome: "approved", reasonCode: "PASS" });
+  await context.stateStore.updateVerificationRun(queued.runId, { ...queued, status: "executed", execution: { status: "decidable" } });
+  const [completed] = await context.service.finalizeAvailableRuns();
+  assert.equal(completed.billing.amountRaw, originalPrice.amountRaw);
+  assert.equal(completed.billing.amount, originalPrice.amount);
+  const receipt = await context.stateStore.getWorkReceiptDocument(completed.receiptId);
+  assert.equal(receipt.intent.valueAtRisk.amountRaw, originalPrice.amountRaw);
+  assert.equal(receipt.intent.valueAtRisk.amount, originalPrice.amount);
+});
+
+test("pricing: custom payment gates cannot authorize the heavy profile for the light amount", async () => {
+  const context = harness();
+  context.gate.authorize = async () => ({ id: "cheap", customer: CUSTOMER, amountRaw: "250000", asset: "USDC", network: "eip155:8453" });
+  await assert.rejects(context.service.createRun(request()), /does not match the pinned profile price/u);
+  assert.deepEqual(await context.stateStore.listActiveVerificationRuns(100), []);
 });

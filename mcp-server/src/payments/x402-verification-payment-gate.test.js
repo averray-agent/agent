@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { TypedDataEncoder, Wallet } from "ethers";
+import { VerificationProfileRegistry } from "../services/verification-profile-registry.js";
 
 import {
   X402VerificationPaymentGate,
@@ -97,7 +98,10 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
 
 async function signedPayment(gate, {
   wallet = Wallet.createRandom(),
-  value = PRICE.amountRaw,
+  price = PRICE,
+  profile = PROFILE,
+  profileLimits = PROFILE_LIMITS,
+  value = price.amountRaw,
   validAfter = NOW_SECONDS - 1n,
   validBefore = NOW_SECONDS + 721n,
   signingName = "USD Coin",
@@ -106,9 +110,9 @@ async function signedPayment(gate, {
   const liveDomain = await gate.eip712Domain();
   const requirements = gate.paymentRequirements({
     domain: liveDomain,
-    price: PRICE,
-    profile: PROFILE,
-    profileLimits: PROFILE_LIMITS,
+    price,
+    profile,
+    profileLimits,
     requestHash: REQUEST_HASH
   });
   const authorization = {
@@ -130,12 +134,12 @@ async function signedPayment(gate, {
   };
 }
 
-async function authorize(gate, paymentProof) {
+async function authorize(gate, paymentProof, { price = PRICE, profile = PROFILE, profileLimits = PROFILE_LIMITS } = {}) {
   return gate.authorize({
     paymentProof,
-    price: PRICE,
-    profile: PROFILE,
-    profileLimits: PROFILE_LIMITS,
+    price,
+    profile,
+    profileLimits,
     requestHash: REQUEST_HASH
   });
 }
@@ -342,4 +346,17 @@ test("configured factory wires the Base gate without importing the Hub gateway o
 function assertDomainReadsName(source) {
   assert.match(source, /this\.token\.name\(\)/u, "payment domain must read the token name()");
   assert.doesNotMatch(source, /this\.token\.symbol\(\)/u, "payment domain must never read symbol()");
+}
+
+for (const profile of new VerificationProfileRegistry().list()) {
+  test(`pricing: ${profile.ref} capture submits its exact authorized amount`, async () => {
+    const args = { price: profile.price, profile: profile.ref, profileLimits: profile.limits };
+    const { gate, calls } = harness({ balance: BigInt(profile.price.amountRaw) });
+    const { paymentProof } = await signedPayment(gate, args);
+    const authorization = await authorize(gate, paymentProof, args);
+    assert.equal(authorization.amountRaw, profile.price.amountRaw);
+    await gate.capture({ authorization });
+    assert.equal(calls.capture, 1);
+    assert.equal(calls.captureArgs[2], BigInt(profile.price.amountRaw));
+  });
 }

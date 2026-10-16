@@ -51,7 +51,11 @@ jq '.resources[0] | {resource, maxAmountRequired, accepts, requirementsBinding}'
 There is exactly one advertised resource today. Stop if it is absent or differs;
 do not guess another payment door. Read the price from discovery, not this page.
 Amounts are exact base-unit integer strings. The resource's `maxAmountRequired`
-summarizes its advertised requirements; the fresh challenge uses `accepts[0].amount`.
+is the largest advertised price, not a quote for every profile. Select the
+`accepts[]` entry whose `extra.profile` matches your `profile@version`. The fresh
+challenge for your complete request uses `accepts[0].amount`. An empty unpaid
+probe lists every published profile; an unknown profile returns a validation
+error naming the published profiles.
 
 Verify's payment identity is Base `eip155:8453`, native USDC token
 `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`, receiving address

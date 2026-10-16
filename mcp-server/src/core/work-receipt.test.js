@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { VERIFY_PROFILE_PRICES } from "../services/verification-profile-registry.js";
 
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
 import {
@@ -315,14 +316,14 @@ test("verify and job receipts share the one canonical content-address function",
     handler: "deterministic",
     handlerVersion: 1,
     limits: { timeoutMs: 120_000 },
-    price: { asset: "USDC", amount: "5", amountRaw: "5000000" }
+    price: VERIFY_PROFILE_PRICES["git-patch-tests-v1"]
   };
   const verifyReceipt = buildVerifyReceipt({
     run: {
       customer: live.poster,
       target: { repository: "github.com/example/project", commit: "1".repeat(40) },
       inputs: { patch: { sha256: "2".repeat(64) }, testCommand: ["npm", "test"] },
-      billing: { status: "captured" }
+      billing: { status: "captured", ...profile.price }
     },
     profile,
     execution: {
@@ -405,7 +406,7 @@ test("MCP verify receipt names each bounded check and carries neither credential
       customer: live.poster,
       target: { endpoint: "https://mcp.example.test/run", transport: "streamable_http", auth: { scheme: "bearer", credentialRef: "run-only" } },
       inputs: {},
-      billing: { status: "captured" }
+      billing: { status: "captured", ...VERIFY_PROFILE_PRICES["mcp-failure-semantics-v1"] }
     },
     profile: {
       name: "mcp-failure-semantics-v1",
@@ -414,7 +415,7 @@ test("MCP verify receipt names each bounded check and carries neither credential
       handler: "deterministic",
       handlerVersion: 1,
       limits: { timeoutMs: 30_000 },
-      price: { asset: "USDC", amount: "5", amountRaw: "5000000" }
+      price: VERIFY_PROFILE_PRICES["mcp-failure-semantics-v1"]
     },
     execution: {
       report: { checks },
