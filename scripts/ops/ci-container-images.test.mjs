@@ -24,6 +24,60 @@ function helperPulls(script) {
   });
 }
 
+// `docker compose -f base.yml [-f override.yml]...` invocations, as file lists.
+function composeStacks(script) {
+  return [...script.matchAll(/\bdocker compose((?:\s+-f\s+[\w./-]+)+)/gu)]
+    .map((match) => [...match[1].matchAll(/-f\s+([\w./-]+)/gu)].map(([, path]) => path));
+}
+
+// Compose's merge for the keys these files use: mappings merge recursively,
+// scalars and sequences from a later file replace earlier ones.
+const isMapping = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+function mergeMappings(base, override) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    merged[key] = isMapping(merged[key]) && isMapping(value) ? mergeMappings(merged[key], value) : value;
+  }
+  return merged;
+}
+
+async function mergedServices(files) {
+  let services = {};
+  for (const file of files) services = mergeMappings(services, yaml.load(await read(file)).services);
+  return services;
+}
+
+// `--build-context <FROM ref>=<source>` flags of one `docker build`, as a map.
+function buildContexts(args) {
+  return Object.fromEntries([...args.matchAll(/--build-context\s+(\S+)/gu)].map(([, flag]) => {
+    const split = flag.indexOf("=");
+    return [flag.slice(0, split), flag.slice(split + 1)];
+  }));
+}
+
+// A named context that replaces a FROM ref with a helper alias must name an
+// alias the same step pulled; anything else must still be a qualified remote.
+function assertContextSource(source, aliases) {
+  assert.match(source, /^docker-image:\/\//u, `unexpected build context: ${source}`);
+  const image = source.slice("docker-image://".length);
+  if (image.startsWith("averray-ci/")) assert.ok(aliases.has(image), `build context alias without a helper pull: ${image}`);
+  else assertRemoteImage(image);
+}
+
+// External image refs of a Dockerfile: FROM and COPY --from that are not stages.
+function dockerfileImages(source) {
+  const stages = new Set();
+  const images = [];
+  for (const [, image, stage] of source.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/gimu)) {
+    if (!stages.has(image) && image !== "scratch") images.push(image);
+    if (stage) stages.add(stage);
+  }
+  for (const [, image] of source.matchAll(/^COPY\s+--from=(\S+)/gimu)) {
+    if (!stages.has(image) && !/^\d+$/u.test(image)) images.push(image);
+  }
+  return images;
+}
+
 function assertRemoteImage(image) {
   assert.equal(typeof image, "string");
   assert.match(image, /^[a-z0-9.-]+\.[a-z0-9.-]+\//u, `unqualified CI image: ${image}`);
@@ -43,7 +97,7 @@ function commandImages(script) {
 
 test("CI remote images, including smoke Compose and Dockerfile bases, never pull from Docker Hub", async () => {
   const dockerfiles = new Set();
-  const composeFiles = new Set();
+  const auditedStacks = new Map();
   let images = 0;
   for (const job of Object.values(ci.jobs)) {
     for (const container of [job.container, ...Object.values(job.services ?? {})].filter(Boolean)) {
@@ -65,36 +119,43 @@ test("CI remote images, including smoke Compose and Dockerfile bases, never pull
       if (pulls.some(({ alias }) => alias === image)) continue;
       assertRemoteImage(image); images++;
     }
-    for (const [, path] of script.matchAll(/docker compose -f ([\w./-]+)/gu)) composeFiles.add(path);
+    for (const files of composeStacks(script)) {
+      // Every invocation of one stack must layer the same overrides, or `down`
+      // and `up` would disagree about which image a service runs.
+      const seen = auditedStacks.get(files[0]);
+      if (seen) assert.deepEqual(files, seen.files, `inconsistent overrides for ${files[0]}`);
+      else auditedStacks.set(files[0], { files, aliases: new Set(pulls.map(({ alias }) => alias)) });
+    }
     for (const [, args] of script.matchAll(/docker build\s+([^\n]+)/gu)) {
       // CI's standalone sandbox build uses the default Dockerfile in its context.
       assert.doesNotMatch(args, /(?:^|\s)(?:-f|--file)(?:\s|=)/u, "extend audit for explicit Dockerfiles");
+      const aliases = new Set(pulls.map(({ alias }) => alias));
+      for (const source of Object.values(buildContexts(args))) assertContextSource(source, aliases);
       dockerfiles.add(`${args.trim().split(/\s+/u).at(-1)}/Dockerfile`);
     }
   }
-  for (const file of composeFiles) {
-    const { services } = yaml.load(await read(file));
+  for (const { files, aliases } of auditedStacks.values()) {
+    const services = await mergedServices(files);
     const builtLocally = new Set(Object.values(services).filter((s) => s.build && s.image).map((s) => s.image));
     for (const service of Object.values(services)) {
-      if (service.image && !builtLocally.has(service.image)) { assertRemoteImage(service.image); images++; }
+      if (service.image?.startsWith("averray-ci/")) {
+        // Unqualified local alias: only legal when the same step's helper made it
+        // and Compose is forbidden to resolve it against Docker Hub.
+        assert.ok(aliases.has(service.image), `compose alias without a helper pull: ${service.image}`);
+        assert.equal(service.pull_policy, "never", `implicit pull of a local alias: ${service.image}`);
+      } else if (service.image && !builtLocally.has(service.image)) { assertRemoteImage(service.image); images++; }
       if (service.build) {
         assert.equal(service.build.context, "..");
         dockerfiles.add(service.build.dockerfile);
+        for (const source of Object.values(service.build.additional_contexts ?? {})) assertContextSource(source, aliases);
       }
     }
   }
+  // Production refs stay audited even where a CI build context replaces them.
   for (const file of dockerfiles) {
-    const stages = new Set();
-    const source = await read(file);
-    for (const [, image, stage] of source.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/gimu)) {
-      if (!stages.has(image) && image !== "scratch") { assertRemoteImage(image); images++; }
-      if (stage) stages.add(stage);
-    }
-    for (const [, image] of source.matchAll(/^COPY\s+--from=(\S+)/gimu)) {
-      if (!stages.has(image) && !/^\d+$/u.test(image)) { assertRemoteImage(image); images++; }
-    }
+    for (const image of dockerfileImages(await read(file))) { assertRemoteImage(image); images++; }
   }
-  assert.equal(composeFiles.size, 2, "both CI smoke stacks must be audited");
+  assert.equal(auditedStacks.size, 2, "both CI smoke stacks must be audited");
   assert.equal(dockerfiles.size, 6, "all transitive CI build files must be audited");
   assert.ok(images >= 10, "audit must not silently stop seeing image references");
 });
@@ -140,6 +201,67 @@ test("real-Redis proof stays mandatory: no skip path and fail-closed readiness",
   assert.match(step.run, /set -euo pipefail/u);
   assert.match(step.run, /::error::Redis never answered PING[^\n]*exit 1/u);
   assert.match(step.run, /VERIFY_RESERVATION_TEST_REDIS_URL=redis:\/\/127\.0\.0\.1:16381/u);
+});
+
+test("verify fixture step resolves every ECR image from digest-pinned helper aliases", async () => {
+  const step = steps.find((s) => s.name === "Verify real fixture inside backend, runner, and proxy images");
+  assert.ok(step);
+  assert.equal(step["continue-on-error"], undefined);
+  assert.equal(step.if, undefined);
+  const script = joinLines(step.run);
+  assert.match(script, /set -euo pipefail/u);
+  // ECR Public's anonymous data limit failed both an implicit `compose up`
+  // pull and `docker build witness/sandbox` (2026-10-16). Each image comes
+  // from the helper: one digest, mirror.gcr.io first, then ECR Public.
+  const pulls = new Map(helperPulls(script).map((pull) => [pull.alias, pull.sources]));
+  assert.equal(pulls.size, helperPulls(script).length, "one helper pull per alias");
+  for (const [alias, sources] of pulls) {
+    const [, name] = alias.match(/^averray-ci\/([^:]+):/u);
+    const digest = sources[0].split("@")[1];
+    assert.match(digest, /^sha256:[0-9a-f]{64}$/u);
+    assert.deepEqual(sources, [`mirror.gcr.io/library/${name}@${digest}`, `${mirror}${name}@${digest}`], alias);
+  }
+  assert.deepEqual(pulls.get("averray-ci/redis:7-alpine"), redisSources);
+  const firstBuild = Math.min(script.search(/\bdocker build\b/u), script.search(/docker compose [^\n]*\bup\b/u));
+  assert.ok(script.lastIndexOf("pull-ci-image.sh") < firstBuild, "every pull precedes every build and compose up");
+
+  const files = ["deploy/docker-compose.verify-smoke.yml", "deploy/docker-compose.verify-smoke.ci.yml"];
+  const stacks = composeStacks(script);
+  assert.equal(stacks.length, 4, "down, two ups, and the proxy guard run");
+  for (const stack of stacks) assert.deepEqual(stack, files);
+  const services = await mergedServices(files);
+  const redis = services["verify-smoke-redis"];
+  assert.equal(redis.image, "averray-ci/redis:7-alpine");
+  assert.equal(redis.pull_policy, "never");
+  // Non-CI users of the base file keep resolving a qualified registry image.
+  assertRemoteImage(yaml.load(await read(files[0])).services["verify-smoke-redis"].image);
+
+  const builds = [...script.matchAll(/docker build\s+([^\n]+)/gu)].map(([, args]) => ({
+    dockerfile: `${args.trim().split(/\s+/u).at(-1)}/Dockerfile`, contexts: buildContexts(args)
+  }));
+  for (const service of Object.values(services).filter((s) => s.build)) {
+    builds.push({ dockerfile: service.build.dockerfile, contexts: service.build.additional_contexts ?? {} });
+  }
+  assert.deepEqual(builds.map((b) => b.dockerfile), [
+    "witness/sandbox/Dockerfile", "deploy/witness-docker-proxy/Dockerfile", "mcp-server/Dockerfile.witness-runner",
+    "mcp-server/Dockerfile.witness-runner", "mcp-server/Dockerfile"
+  ]);
+  let covered = 0;
+  for (const { dockerfile, contexts } of builds) {
+    const refs = dockerfileImages(await read(dockerfile));
+    // A context whose key matches no FROM is silently ignored by BuildKit.
+    for (const key of Object.keys(contexts)) assert.ok(refs.includes(key), `${dockerfile}: unused build context ${key}`);
+    for (const ref of refs.filter((r) => r.startsWith(mirror))) {
+      const [, name, tag, digest] = ref.slice(mirror.length).match(/^([^:@]+):([^@]+)(?:@(sha256:[0-9a-f]{64}))?$/u);
+      const alias = `averray-ci/${name}:${tag}`;
+      assert.equal(contexts[ref], `docker-image://${alias}`, `${dockerfile}: ${ref} would pull from ECR`);
+      assert.ok(pulls.has(alias), `no helper pull for ${alias}`);
+      // A production digest pin must be the digest CI pulls; a floating tag gets a CI pin.
+      if (digest) assert.ok(pulls.get(alias).every((source) => source.endsWith(`@${digest}`)), `${alias} digest drifted from ${dockerfile}`);
+      covered++;
+    }
+  }
+  assert.equal(covered, 8, "python, docker-cli twice, and five node FROMs");
 });
 
 async function pullFixture(mode, args = ["averray-ci/redis:7-alpine", ...redisSources]) {
