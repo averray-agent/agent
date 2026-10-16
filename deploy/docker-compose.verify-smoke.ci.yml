@@ -1,0 +1,9 @@
+# CI-only override for docker-compose.verify-smoke.yml. CI pre-pulls redis by
+# digest through scripts/ops/pull-ci-image.sh (mirror.gcr.io, then ECR Public),
+# so an exhausted anonymous registry quota cannot fail the smoke from an
+# implicit `compose up` pull. `never` makes a missing alias fail loudly instead
+# of resolving the unqualified name against Docker Hub.
+services:
+  verify-smoke-redis:
+    image: averray-ci/redis:7-alpine
+    pull_policy: never

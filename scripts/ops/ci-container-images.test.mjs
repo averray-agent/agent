@@ -24,6 +24,23 @@ function helperPulls(script) {
   });
 }
 
+// `docker compose -f base.yml [-f override.yml]...` invocations, as file lists.
+function composeStacks(script) {
+  return [...script.matchAll(/\bdocker compose((?:\s+-f\s+[\w./-]+)+)/gu)]
+    .map((match) => [...match[1].matchAll(/-f\s+([\w./-]+)/gu)].map(([, path]) => path));
+}
+
+// Compose's merge for the keys these files use: later files override per service key.
+async function mergedServices(files) {
+  const services = {};
+  for (const file of files) {
+    for (const [name, service] of Object.entries(yaml.load(await read(file)).services)) {
+      services[name] = { ...services[name], ...service };
+    }
+  }
+  return services;
+}
+
 function assertRemoteImage(image) {
   assert.equal(typeof image, "string");
   assert.match(image, /^[a-z0-9.-]+\.[a-z0-9.-]+\//u, `unqualified CI image: ${image}`);
@@ -43,7 +60,7 @@ function commandImages(script) {
 
 test("CI remote images, including smoke Compose and Dockerfile bases, never pull from Docker Hub", async () => {
   const dockerfiles = new Set();
-  const composeFiles = new Set();
+  const auditedStacks = new Map();
   let images = 0;
   for (const job of Object.values(ci.jobs)) {
     for (const container of [job.container, ...Object.values(job.services ?? {})].filter(Boolean)) {
@@ -65,18 +82,29 @@ test("CI remote images, including smoke Compose and Dockerfile bases, never pull
       if (pulls.some(({ alias }) => alias === image)) continue;
       assertRemoteImage(image); images++;
     }
-    for (const [, path] of script.matchAll(/docker compose -f ([\w./-]+)/gu)) composeFiles.add(path);
+    for (const files of composeStacks(script)) {
+      // Every invocation of one stack must layer the same overrides, or `down`
+      // and `up` would disagree about which image a service runs.
+      const seen = auditedStacks.get(files[0]);
+      if (seen) assert.deepEqual(files, seen.files, `inconsistent overrides for ${files[0]}`);
+      else auditedStacks.set(files[0], { files, aliases: new Set(pulls.map(({ alias }) => alias)) });
+    }
     for (const [, args] of script.matchAll(/docker build\s+([^\n]+)/gu)) {
       // CI's standalone sandbox build uses the default Dockerfile in its context.
       assert.doesNotMatch(args, /(?:^|\s)(?:-f|--file)(?:\s|=)/u, "extend audit for explicit Dockerfiles");
       dockerfiles.add(`${args.trim().split(/\s+/u).at(-1)}/Dockerfile`);
     }
   }
-  for (const file of composeFiles) {
-    const { services } = yaml.load(await read(file));
+  for (const { files, aliases } of auditedStacks.values()) {
+    const services = await mergedServices(files);
     const builtLocally = new Set(Object.values(services).filter((s) => s.build && s.image).map((s) => s.image));
     for (const service of Object.values(services)) {
-      if (service.image && !builtLocally.has(service.image)) { assertRemoteImage(service.image); images++; }
+      if (service.image?.startsWith("averray-ci/")) {
+        // Unqualified local alias: only legal when the same step's helper made it
+        // and Compose is forbidden to resolve it against Docker Hub.
+        assert.ok(aliases.has(service.image), `compose alias without a helper pull: ${service.image}`);
+        assert.equal(service.pull_policy, "never", `implicit pull of a local alias: ${service.image}`);
+      } else if (service.image && !builtLocally.has(service.image)) { assertRemoteImage(service.image); images++; }
       if (service.build) {
         assert.equal(service.build.context, "..");
         dockerfiles.add(service.build.dockerfile);
@@ -94,7 +122,7 @@ test("CI remote images, including smoke Compose and Dockerfile bases, never pull
       if (!stages.has(image) && !/^\d+$/u.test(image)) { assertRemoteImage(image); images++; }
     }
   }
-  assert.equal(composeFiles.size, 2, "both CI smoke stacks must be audited");
+  assert.equal(auditedStacks.size, 2, "both CI smoke stacks must be audited");
   assert.equal(dockerfiles.size, 6, "all transitive CI build files must be audited");
   assert.ok(images >= 10, "audit must not silently stop seeing image references");
 });
@@ -140,6 +168,27 @@ test("real-Redis proof stays mandatory: no skip path and fail-closed readiness",
   assert.match(step.run, /set -euo pipefail/u);
   assert.match(step.run, /::error::Redis never answered PING[^\n]*exit 1/u);
   assert.match(step.run, /VERIFY_RESERVATION_TEST_REDIS_URL=redis:\/\/127\.0\.0\.1:16381/u);
+});
+
+test("verify smoke Redis runs the helper's digest-pinned alias with pull_policy: never", async () => {
+  const step = steps.find((s) => s.name === "Verify real fixture inside backend, runner, and proxy images");
+  assert.ok(step);
+  assert.equal(step["continue-on-error"], undefined);
+  assert.equal(step.if, undefined);
+  const script = joinLines(step.run);
+  assert.match(script, /set -euo pipefail/u);
+  // ECR Public's anonymous data limit must not fail an implicit `compose up` pull.
+  assert.deepEqual(helperPulls(script), [{ alias: "averray-ci/redis:7-alpine", sources: redisSources }]);
+  const files = ["deploy/docker-compose.verify-smoke.yml", "deploy/docker-compose.verify-smoke.ci.yml"];
+  const stacks = composeStacks(script);
+  assert.equal(stacks.length, 4, "down, two ups, and the proxy guard run");
+  for (const stack of stacks) assert.deepEqual(stack, files);
+  const redis = (await mergedServices(files))["verify-smoke-redis"];
+  assert.equal(redis.image, "averray-ci/redis:7-alpine");
+  assert.equal(redis.pull_policy, "never");
+  assert.ok(script.indexOf("pull-ci-image.sh") < script.search(/docker compose [^\n]*\bup\b/u), "pull before compose up");
+  // Non-CI users of the base file keep resolving a qualified registry image.
+  assertRemoteImage(yaml.load(await read(files[0])).services["verify-smoke-redis"].image);
 });
 
 async function pullFixture(mode, args = ["averray-ci/redis:7-alpine", ...redisSources]) {

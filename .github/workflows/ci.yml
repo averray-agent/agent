@@ -194,17 +194,23 @@ jobs:
           mkdir -p "$WITNESS_RUNTIME_ROOT"
           chmod 0777 "$WITNESS_RUNTIME_ROOT"
           cleanup() {
-            docker compose -f deploy/docker-compose.verify-smoke.yml down -v --remove-orphans
+            docker compose -f deploy/docker-compose.verify-smoke.yml -f deploy/docker-compose.verify-smoke.ci.yml \
+              down -v --remove-orphans
           }
           trap cleanup EXIT
+          # Same redis digest and fallback as the real-Redis step; the CI
+          # override runs it from the local alias with pull_policy: never.
+          bash scripts/ops/pull-ci-image.sh averray-ci/redis:7-alpine \
+            mirror.gcr.io/library/redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 \
+            public.ecr.aws/docker/library/redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
           docker build \
             -t averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27 \
             witness/sandbox
-          docker compose -f deploy/docker-compose.verify-smoke.yml \
+          docker compose -f deploy/docker-compose.verify-smoke.yml -f deploy/docker-compose.verify-smoke.ci.yml \
             up -d --build verify-smoke-redis verify-smoke-proxy
-          docker compose -f deploy/docker-compose.verify-smoke.yml \
+          docker compose -f deploy/docker-compose.verify-smoke.yml -f deploy/docker-compose.verify-smoke.ci.yml \
             run --rm verify-smoke-proxy-guard
-          docker compose -f deploy/docker-compose.verify-smoke.yml \
+          docker compose -f deploy/docker-compose.verify-smoke.yml -f deploy/docker-compose.verify-smoke.ci.yml \
             up --build --abort-on-container-exit \
             --exit-code-from verify-smoke-backend \
             verify-smoke-backend verify-smoke-runner
