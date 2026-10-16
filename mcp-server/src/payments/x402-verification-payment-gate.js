@@ -1,5 +1,6 @@
 import {
   Contract,
+  FetchRequest,
   Interface,
   JsonRpcProvider,
   Signature,
@@ -11,6 +12,7 @@ import {
 } from "ethers";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import { createLogger } from "../core/logger.js";
 import { AppError, ConfigError } from "../core/errors.js";
 import { KmsSigner } from "../blockchain/kms-signer.js";
 import {
@@ -31,6 +33,19 @@ export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
 const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
 const ADMISSION_READ_TIMEOUT_MS = 8_000;
+
+function createBasePaymentProvider(config, logger) {
+  const request = new FetchRequest(config.rpcUrl);
+  request.timeout = 8_000;
+  // The gate owns retries. In particular, HTTP 429 must not start ethers'
+  // independent throttle loop on top of the domain backoff.
+  request.setThrottleParams({ maxAttempts: 1 });
+  const provider = new JsonRpcProvider(request, config.chainId, { staticNetwork: true });
+  provider.on("error", (error) => logger.warn?.(
+    { reasonCode: "verify_base_provider_error", code: error.code }, "verification_payment_gate.provider_error"
+  ));
+  return provider;
+}
 
 async function admissionRead(read, reason) {
   let timer;
@@ -139,12 +154,12 @@ export function resolveX402VerificationPaymentConfig(env = process.env) {
 
 export async function createConfiguredX402VerificationPaymentGate(
   env = process.env,
-  { logger = console, submitter, provider, tokenContract, captureTokenContract, now } = {}
+  { logger = createLogger({ name: "verify-payment", level: env.LOG_LEVEL }), submitter, provider, tokenContract, captureTokenContract, now } = {}
 ) {
   try {
     const config = resolveX402VerificationPaymentConfig(env);
     if (!config.enabled) return undefined;
-    const baseProvider = provider ?? new JsonRpcProvider(config.rpcUrl, config.chainId);
+    const baseProvider = provider ?? createBasePaymentProvider(config, logger);
     const gate = new X402VerificationPaymentGate({
       config,
       provider: baseProvider,
@@ -153,14 +168,12 @@ export async function createConfiguredX402VerificationPaymentGate(
       submitter: captureTokenContract
         ? submitter
         : submitter ?? createBaseSubmitter(env, baseProvider, logger),
-      now
+      now,
+      logger
     });
     // Warm before listening, but retain the configured gate (including capture
     // reconciliation) through an RPC outage. Domain reads own bounded retries.
-    await gate.eip712Domain().catch((error) => logger.warn?.(
-      { reasonCode: "verify_payment_domain_unavailable", err: error },
-      "verification_payment_gate.domain_unavailable"
-    ));
+    await gate.eip712Domain().catch(() => {});
     return gate;
   } catch (error) {
     logger.warn?.(
@@ -178,11 +191,13 @@ export class X402VerificationPaymentGate {
     tokenContract,
     captureTokenContract,
     submitter,
-    now = () => new Date()
+    now = () => new Date(),
+    logger = createLogger({ name: "verify-payment", level: process.env.LOG_LEVEL })
   } = {}) {
     if (!config?.enabled) throw new ConfigError("X402VerificationPaymentGate requires enabled configuration.");
     this.config = config;
-    this.provider = provider ?? new JsonRpcProvider(config.rpcUrl, config.chainId);
+    this.logger = logger;
+    this.provider = provider ?? createBasePaymentProvider(config, logger);
     this.token = tokenContract ?? new Contract(config.asset, TOKEN_ABI, this.provider);
     if (!captureTokenContract && !submitter) {
       throw new ConfigError("X402VerificationPaymentGate requires a Base transaction submitter.");
@@ -193,6 +208,7 @@ export class X402VerificationPaymentGate {
     this.domainReady = false;
     this.domainError = undefined;
     this.domainRetryDelayMs = 1_000;
+    this.domainNextAttemptAt = 0;
     this.domainRetryTimer = undefined;
   }
 
@@ -466,12 +482,20 @@ export class X402VerificationPaymentGate {
     // A deterministic identity mismatch requires operator correction/restart.
     if (this.domainError?.details?.retryable === false) throw this.domainError;
     if (!this.domainPromise) {
+      if (this.domainError && Date.now() < this.domainNextAttemptAt) {
+        this.domainError.details.retryAfterSeconds = Math.ceil((this.domainNextAttemptAt - Date.now()) / 1_000);
+        throw this.domainError;
+      }
       clearTimeout(this.domainRetryTimer);
       this.domainRetryTimer = undefined;
       this.domainPromise = admissionRead(() => this.readEip712Domain(), "eip712_domain")
         .then((domain) => {
           this.domainReady = true;
+          if (this.domainError) this.logger.info?.(
+            { reasonCode: "verify_payment_domain_recovered" }, "verification_payment_gate.domain_recovered"
+          );
           this.domainError = undefined;
+          this.domainNextAttemptAt = 0;
           this.domainRetryDelayMs = 1_000;
           return domain;
         }).catch((cause) => {
@@ -483,12 +507,18 @@ export class X402VerificationPaymentGate {
             "Verify payment domain validation is unavailable. No work was admitted and no money moved.",
             { code: "payment_domain_unavailable", statusCode: 503, details: {
               status: "unavailable", retryable, customerFunds: "unchanged",
+              ...(retryable ? { retryAfterSeconds: this.domainRetryDelayMs / 1_000 } : {}),
               action: retryable ? "retry_when_base_domain_reads_recover" : "operator_check_payment_domain"
             } }
           );
+          this.logger.warn?.(
+            { reasonCode: "verify_payment_domain_unavailable", err: this.domainError },
+            "verification_payment_gate.domain_unavailable"
+          );
           if (retryable) {
-            // Requests can retry immediately; idle processes recover too. Failed
-            // attempts back off 1, 2, 4, ... 30 seconds, each bounded to 8 seconds.
+            // Both requests and the background worker obey the same deadline.
+            // Attempts back off 1, 2, 4, ... 30 seconds and share in-flight reads.
+            this.domainNextAttemptAt = Date.now() + this.domainRetryDelayMs;
             this.domainRetryTimer = setTimeout(() => {
               void this.eip712Domain().catch(() => {});
             }, this.domainRetryDelayMs);
@@ -506,14 +536,14 @@ export class X402VerificationPaymentGate {
   }
 
   async readEip712Domain() {
-    const [network, liveName, onchainSeparator] = await Promise.all([
-      this.provider.getNetwork(),
+    const [chainId, liveName, onchainSeparator] = await Promise.all([
+      this.provider.send("eth_chainId", []),
       this.token.name(),
       this.token.DOMAIN_SEPARATOR()
     ]);
     const mismatch = (message) => new AppError(message, { code: "payment_domain_mismatch" });
-    if (BigInt(network.chainId) !== BigInt(this.config.chainId)) {
-      throw mismatch(`Base RPC returned chainId ${network.chainId}.`);
+    if (BigInt(chainId) !== BigInt(this.config.chainId)) {
+      throw mismatch(`Base RPC returned chainId ${chainId}.`);
     }
     if (String(liveName) !== this.config.assetEip712Name) {
       throw mismatch(

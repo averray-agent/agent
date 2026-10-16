@@ -1585,7 +1585,7 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Directory-safe discovery and current payment terms.",
+            "description": "Directory-safe discovery and current payment terms. During a payment-domain outage this remains 200 with pricing.status unavailable.",
             "content": { "application/json": { "schema": { "type": "object", "required": ["name", "url", "description", "discoveryMode", "capabilities", "auth", "pricing"], "additionalProperties": true } } }
           }
         }
@@ -1600,7 +1600,7 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Descriptive card and current payment terms.",
+            "description": "Descriptive card and current payment terms. During a payment-domain outage this remains 200 with pricing.status unavailable.",
             "content": { "application/json": { "schema": { "type": "object", "required": ["name", "url", "description", "discoveryMode", "capabilities", "pricing"], "additionalProperties": true } } }
           }
         }
@@ -1698,7 +1698,7 @@
             }
           },
           "503": {
-            "description": "Verify payment domain is unavailable: payment_domain_unavailable with details.status unavailable. Transport errors/timeouts recover through bounded background and lazy retries without restart; identity mismatches require operator correction. No empty healthy resource catalogue is returned. Cache-Control: no-store.",
+            "description": "Verify payment domain is unavailable: payment_domain_unavailable with details.status unavailable. Transport errors/timeouts recover through background and request-triggered retries sharing one bounded backoff window, advertised by Retry-After, without restart; identity mismatches require operator correction. No empty healthy resource catalogue is returned. Cache-Control: no-store.",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" }
@@ -2037,7 +2037,7 @@
             }
           },
           "503": {
-            "description": "Payment or execution capability unavailable. payment_domain_unavailable means the configured EIP-712 domain is not yet validated: details.status unavailable, details.retryable true for transport errors/timeouts or false for deterministic identity mismatches, Cache-Control no-store. Transient failures retry in the background and lazily without restart; no 402 without requirements is emitted. Each admission getBlockNumber, authorizationState and balanceOf read has an 8-second deadline. A timeout returns payment_chain_read_timeout with details.reason base_block_read_timeout, base_nonce_state_read_timeout or base_balance_read_timeout and details.action retry_when_base_reads_recover. payment_block_unavailable with details.reason base_block_read_failed means the Base admission checkpoint could not be read; no run is admitted. payment_balance_unavailable means the Base USDC balance read failed: details.reason base_balance_read_failed, details.action retry_when_base_reads_recover. No run or reservation is created; a failed read never admits work.",
+            "description": "Payment or execution capability unavailable. payment_domain_unavailable means the configured EIP-712 domain is not yet validated: details.status unavailable, details.retryable true for transport errors/timeouts or false for deterministic identity mismatches, Cache-Control no-store. Transient failures retry in the background and on requests after the shared backoff deadline, with Retry-After on the 503; requests inside the window make no provider calls; no 402 without requirements is emitted. Each admission getBlockNumber, authorizationState and balanceOf read has an 8-second deadline. A timeout returns payment_chain_read_timeout with details.reason base_block_read_timeout, base_nonce_state_read_timeout or base_balance_read_timeout and details.action retry_when_base_reads_recover. payment_block_unavailable with details.reason base_block_read_failed means the Base admission checkpoint could not be read; no run is admitted. payment_balance_unavailable means the Base USDC balance read failed: details.reason base_balance_read_failed, details.action retry_when_base_reads_recover. No run or reservation is created; a failed read never admits work.",
             "content": {
               "application/json": {
                 "schema": {

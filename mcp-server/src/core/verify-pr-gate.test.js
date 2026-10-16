@@ -26,7 +26,7 @@ function gate() {
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600
     },
-    provider: { async getNetwork() { return { chainId: 8453n }; } },
+    provider: { async send(method) { assert.equal(method, "eth_chainId"); return "0x2105"; } },
     tokenContract: {
       async name() { return domain.name; },
       async DOMAIN_SEPARATOR() { return TypedDataEncoder.hashDomain(domain); }

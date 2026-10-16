@@ -11,7 +11,9 @@ import { metricPathLabel } from "../../mcp-server/src/protocols/http/http-helper
 const output = process.argv[2];
 assert.ok(output && !output.startsWith("--"), "Usage: node scripts/ops/measure-verify-listing-internal.mjs <output.json> [--assert-guards]");
 const checkGuards = process.argv.includes("--assert-guards");
-const checkRecovery = process.argv.includes("--assert-recovery");
+const checkHung = process.argv.includes("--assert-hung-recovery");
+const checkRecovery = process.argv.includes("--assert-recovery") || checkHung;
+const outageStatus = process.argv.includes("--rpc-429") ? 429 : 503;
 let rpcDown = checkRecovery;
 const root = process.cwd();
 const abi = new Interface(["function name() view returns (string)", "function DOMAIN_SEPARATOR() view returns (bytes32)"]);
@@ -24,7 +26,8 @@ const rpc = createServer(async (req, res) => {
   const input = JSON.parse(body);
   if (rpcDown && req.url !== "/hub") {
     rpcCalls += Array.isArray(input) ? input.length : 1;
-    res.writeHead(503, { "content-type": "application/json" });
+    if (checkHung) return; // Leave the TCP connection open with no response.
+    res.writeHead(outageStatus, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "temporary RPC outage" }));
     return;
   }
@@ -71,9 +74,10 @@ const child = spawn(process.execPath, [join(root, "mcp-server/src/protocols/http
     X402_PAYMENT_ASSET_EIP712_NAME: domain.name, X402_PAYMENT_ASSET_EIP712_VERSION: domain.version,
     X402_PUBLIC_ORIGIN: base, MCP_PROBER_URL: "http://127.0.0.1:1", MCP_EGRESS_GRANT_SOCKET: socket
   },
-  stdio: ["ignore", "ignore", "pipe"]
+  stdio: ["ignore", "pipe", "pipe"]
 });
-let stderr = "";
+let stderr = "", stdout = "";
+child.stdout.on("data", (chunk) => { stdout = (stdout + chunk).slice(-10_000); });
 child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-3000); });
 const request = (path, options) => fetch(base + path, { ...options, signal: AbortSignal.timeout(10_000) });
 try {
@@ -95,6 +99,7 @@ try {
       assert.equal(response.status, 503);
       assert.equal(response.headers.get("cache-control"), "no-store");
       assert.equal(response.headers.get("payment-required"), null);
+      assert.ok(Number(response.headers.get("retry-after")) >= 1);
       const body = await response.json();
       assert.equal(body.error, "payment_domain_unavailable");
       assert.equal(body.details.status, "unavailable");
@@ -102,8 +107,35 @@ try {
       assert.equal(body.resources, undefined, "outage cannot look like a healthy empty catalogue");
       assert.ok(!body.message.includes("not enabled yet"));
     }
+    for (const path of ["/.well-known/agent-card.json", "/.well-known/ai-agent.json"]) {
+      const card = await request(path);
+      assert.equal(card.status, 200);
+      assert.equal(card.headers.get("cache-control"), "no-store");
+      const body = await card.json();
+      assert.deepEqual(body.pricing, { status: "unavailable" });
+      assert.ok(body.capabilities.length > 0);
+    }
+    const burstStart = rpcCalls;
+    for (let i = 0; i < 20; i++) {
+      const response = await post();
+      assert.equal(response.status, 503);
+      assert.ok(Number(response.headers.get("retry-after")) >= 1);
+      await response.text();
+    }
+    assert.equal(rpcCalls, burstStart, "outage request burst must not bypass backoff");
     rpcDown = false;
-    const recovered = await post();
+    const recoveredAt = performance.now();
+    let recovered;
+    do {
+      recovered = await post();
+      if (recovered.status === 402) break;
+      assert.equal(recovered.status, 503);
+      const retryAfter = Number(recovered.headers.get("retry-after"));
+      assert.ok(retryAfter >= 1 && retryAfter <= 30);
+      await recovered.text();
+      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1_000));
+    } while (performance.now() - recoveredAt < 30_000);
+    assert.ok(performance.now() - recoveredAt < 30_000, "hung RPC must recover within one maximum backoff window");
     assert.equal(recovered.status, 402, await recovered.clone().text());
     assert.equal((await recovered.json()).accepts.length, 3);
     const recoveredHealth = await (await request("/health")).json();
@@ -119,6 +151,8 @@ try {
       assert.equal((await response.json()).accepts[0].amount, profile.price.amountRaw);
     }
     assert.equal(rpcCalls, before, "recovered unpaid requests and discovery must stay RPC-free");
+    assert.doesNotMatch(stdout + stderr, /JsonRpcProvider failed to detect network|verification_payment_gate\./u,
+      "Base provider and gate logging must honour LOG_LEVEL=silent");
   }
   const readMetric = async (path, method, required = false) => {
     const res = await request("/metrics"); assert.equal(res.status, 200);

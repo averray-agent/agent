@@ -113,6 +113,11 @@ test("unavailable x402 terms stay empty or fail honestly without a fallback pric
     const empty = { x402Version: 2, resources: [] };
     await createPublicMetadataRoutes({ ...dependencies, getX402Discovery: async () => empty })({ request: { method: "GET" }, pathname: path, response });
     assert.deepEqual(response.body.pricing, empty);
+    const domainUnavailable = Object.assign(new Error("domain unavailable"), { code: "payment_domain_unavailable", statusCode: 503 });
+    await createPublicMetadataRoutes({ ...dependencies, getX402Discovery: async () => { throw domainUnavailable; } })({ request: { method: "GET" }, pathname: path, response });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.pricing, { status: "unavailable" });
+    assert.ok(response.body.capabilities.length > 0);
     const unavailable = new Error("payment terms unavailable");
     await assert.rejects(createPublicMetadataRoutes({ ...dependencies, getX402Discovery: async () => { throw unavailable; } })({ request: { method: "GET" }, pathname: path, response }), (error) => error === unavailable);
   }

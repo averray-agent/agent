@@ -343,10 +343,14 @@ export function createPublicMetadataRoutes({
         chainId: authConfig?.chainId,
         minimumRewardUsdc
       });
+      const pricing = await Promise.resolve().then(() => getX402Discovery()).catch((error) => {
+        if (error?.code !== "payment_domain_unavailable") throw error;
+        return { status: "unavailable" };
+      });
       respond(
         response,
         200,
-        buildDiscoveryAlias(manifest, await getX402Discovery(), {
+        buildDiscoveryAlias(manifest, pricing, {
           card: pathname === "/.well-known/agent-card.json"
         }),
         { "cache-control": "no-store" }

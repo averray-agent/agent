@@ -19,7 +19,9 @@ const abi = new Interface(["function name() view returns (string)", "function DO
 function fixture({ network = async () => ({ chainId: 8453n }) } = {}) {
   const calls = [];
   const provider = {
-    async getNetwork() { calls.push("getNetwork"); return network(); },
+    async getNetwork() { return { chainId: 8453n }; },
+    async send(method, params) { assert.equal(method, "eth_chainId"); assert.deepEqual(params, []);
+      calls.push("eth_chainId"); return (await network()).chainId; },
     async call({ data }) {
       calls.push("call");
       const fn = abi.parseTransaction({ data }).name;
@@ -40,7 +42,7 @@ test("listing unpaid probes use the startup-validated domain: zero provider call
   const f = fixture();
   const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
   assert.ok(gate);
-  assert.deepEqual(f.calls.sort(), ["call", "call", "getNetwork"], "startup must validate the actual token domain");
+  assert.deepEqual(f.calls.sort(), ["call", "call", "eth_chainId"], "startup must validate the actual token domain");
   f.calls.length = 0;
   const store = new MemoryStateStore();
   store.reserveVerificationRun = async () => assert.fail("unpaid reservation");
@@ -82,7 +84,7 @@ test("listing startup waits for domain validation", async () => {
 
 for (const mismatch of ["chain", "provider-chain", "name", "separator"]) {
   test(`listing ${mismatch} mismatch stays fail-closed without retrying`, async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
     const f = fixture({ network: async () => {
       if (mismatch === "provider-chain") throw Object.assign(new Error("network changed"), { code: "NETWORK_ERROR", event: "changed" });
       return { chainId: mismatch === "chain" ? 1n : 8453n };
@@ -99,7 +101,7 @@ for (const mismatch of ["chain", "provider-chain", "name", "separator"]) {
     assert.ok(gate, "valid config must retain its gate");
     assert.equal(f.warnings.length, 1);
     const reads = f.calls.length;
-    f.options.provider.getNetwork = async () => assert.fail("identity mismatch must not retry");
+    f.options.provider.send = async () => assert.fail("identity mismatch must not retry");
     for (let i = 0; i < 3; i++) {
       await assert.rejects(gate.eip712Domain(), { statusCode: 503, code: "payment_domain_unavailable",
         details: { status: "unavailable", retryable: false, customerFunds: "unchanged", action: "operator_check_payment_domain" } });
@@ -112,6 +114,7 @@ for (const mismatch of ["chain", "provider-chain", "name", "separator"]) {
 }
 
 test("listing RPC outage returns 503 then lazily recovers on the same gate, including in-flight capture reconciliation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
   let down = true;
   const f = fixture({ network: async () => {
     if (down) throw new Error("RPC unavailable");
@@ -134,6 +137,7 @@ test("listing RPC outage returns 503 then lazily recovers on the same gate, incl
   const pendingCapture = { authorization: {}, pendingTransactionHash: "0x" + "ab".repeat(32) };
   await assert.rejects(gate.reconcileCapture(pendingCapture), /RPC unavailable/);
   down = false;
+  t.mock.timers.tick(1_000);
   const replies = await Promise.all([post(), post(), post()]);
   for (const reply of replies) { assert.equal(reply.statusCode, 402); assert.equal(reply.body.accepts.length, 3); }
   assert.deepEqual(gate.getDomainWarnings(), []);
@@ -145,7 +149,7 @@ test("listing RPC outage returns 503 then lazily recovers on the same gate, incl
 });
 
 test("listing background recovery retries with bounded exponential backoff without any request", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   let down = true;
   const f = fixture({ network: async () => {
     if (down) throw new Error("RPC unavailable");
@@ -156,9 +160,9 @@ test("listing background recovery retries with bounded exponential backoff witho
   let attempts = 1;
   for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
     t.mock.timers.tick(delay - 1); await new Promise(setImmediate);
-    assert.equal(f.calls.filter((c) => c === "getNetwork").length, attempts, "backoff avoids a retry storm");
+    assert.equal(f.calls.filter((c) => c === "eth_chainId").length, attempts, "backoff avoids a retry storm");
     t.mock.timers.tick(1); await new Promise(setImmediate);
-    assert.equal(f.calls.filter((c) => c === "getNetwork").length, ++attempts);
+    assert.equal(f.calls.filter((c) => c === "eth_chainId").length, ++attempts);
   }
   down = false;
   t.mock.timers.tick(30_000); await new Promise(setImmediate);
@@ -169,7 +173,7 @@ test("listing background recovery retries with bounded exponential backoff witho
 });
 
 test("listing startup domain timeout is bounded to eight seconds and recovers", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   let down = true;
   const f = fixture({ network: () => down ? new Promise(() => {}) : Promise.resolve({ chainId: 8453n }) });
   const pending = createConfiguredX402VerificationPaymentGate(env, f.options);
@@ -182,5 +186,43 @@ test("listing startup domain timeout is bounded to eight seconds and recovers", 
   assert.equal(f.warnings[0][0].err.statusCode, 503);
   down = false;
   t.mock.timers.tick(1_000); await new Promise(setImmediate);
+  assert.deepEqual(gate.getDomainWarnings(), []);
+});
+
+
+test("listing request bursts obey the deadline; first request after it starts exactly one shared attempt", async (t) => {
+  // Move only the wall clock: the background timer has not fired when a
+  // request reaches the deadline, so this specifically tests lazy recovery.
+  t.mock.timers.enable({ apis: ["Date"] });
+  let down = true, release;
+  const f = fixture({ network: async () => {
+    if (down) throw new Error("RPC unavailable");
+    return new Promise((resolve) => { release = resolve; });
+  } });
+  const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
+  t.after(() => gate.close());
+  f.calls.length = 0;
+  const unavailable = (error) => error.code === "payment_domain_unavailable"
+    && error.statusCode === 503 && error.details.retryAfterSeconds === 1;
+  for (let i = 0; i < 50; i++) await assert.rejects(gate.eip712Domain(), unavailable);
+  t.mock.timers.tick(999);
+  await Promise.all(Array.from({ length: 50 }, () => assert.rejects(gate.eip712Domain(), unavailable)));
+  assert.deepEqual(f.calls, [], "requests within the retry window must do zero provider work");
+  t.mock.timers.tick(1);
+  await assert.rejects(gate.eip712Domain(), (error) => error.code === "payment_domain_unavailable"
+    && error.statusCode === 503 && error.details.retryAfterSeconds === 2,
+  "a fresh failed attempt must advertise the next backoff, before any cached request");
+  assert.deepEqual(f.calls.sort(), ["call", "call", "eth_chainId"]);
+  f.calls.length = 0;
+  down = false;
+  t.mock.timers.tick(1_999);
+  await assert.rejects(gate.eip712Domain(), unavailable);
+  assert.deepEqual(f.calls, []);
+  t.mock.timers.tick(1);
+  const pending = Array.from({ length: 50 }, () => gate.eip712Domain());
+  await new Promise(setImmediate);
+  assert.deepEqual(f.calls.sort(), ["call", "call", "eth_chainId"], "one domain attempt, shared across the burst");
+  release({ chainId: 8453n });
+  for (const value of await Promise.all(pending)) assert.deepEqual(value, domain);
   assert.deepEqual(gate.getDomainWarnings(), []);
 });

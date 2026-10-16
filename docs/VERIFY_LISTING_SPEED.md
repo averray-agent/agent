@@ -63,21 +63,37 @@ before accepting requests. The existing domain promise cache is retained;
 no authorization, balance, nonce, capture or reconciliation logic changes.
 Startup validation uses an eight-second bound and always retains a correctly
 configured gate. A transport failure or timeout retries in the background
-with 1/2/4/8/16/30-second capped backoff and lazily on the next request;
-concurrent attempts share one promise. Successful recovery stops retries
-and caches the domain again. Chain ID, token name and separator mismatches
+with 1/2/4/8/16/30-second capped backoff. Requests inside the same
+`domainNextAttemptAt` window immediately reuse the 503 with a `Retry-After`
+header and make zero provider calls. The first request after the deadline
+can start the retry; concurrent attempts share one promise. Successful
+recovery stops retries and caches the domain again. Chain ID, token name and separator mismatches
 stay fail-closed until operator correction and restart. Paid admission
 retains its existing deadlines and in-flight captures retain their gate.
+
+The Base provider uses `staticNetwork`; the gate explicitly reads
+`eth_chainId` to validate the chain before caching the domain. Its
+`FetchRequest` has an eight-second transport timeout and one attempt,
+so ethers cannot add independent network-detection or HTTP 429 retry
+loops. Provider errors and gate state transitions use the structured
+logger and honour `LOG_LEVEL`.
 
 While the domain is unavailable, unpaid probes and x402 discovery return
 HTTP 503 `payment_domain_unavailable`, with `details.status: unavailable`
 and `Cache-Control: no-store`. No empty healthy discovery or 402 without
-requirements is emitted. `/health` is degraded with the warning
+requirements is emitted. The agent-card and ai-agent discovery aliases
+remain HTTP 200 with all descriptive metadata and
+`pricing: { status: "unavailable" }`, using `Cache-Control: no-store`.
+`/health` is degraded with the warning
 `verify_payment_domain_unavailable`; process liveness keeps its existing
 HTTP status policy. A successful retry clears the warning without restart.
 The real-server smoke fixture verifies boot outage, recovery and zero
 provider calls on subsequent probes/discovery; `--assert-recovery` runs
-that scenario in the internal measurement script.
+that scenario in the internal measurement script. `--rpc-429` exercises
+rate limiting and `--assert-hung-recovery` holds the RPC connection open.
+Both variants assert recovery without restart within a maximum backoff
+window, cached 503s for request bursts, Retry-After and both available cards.
+A separate wire test bounds transport timeout independently of admission.
 
 The root, OpenAPI and llms representations share one build promise per
 router/process, including concurrent first requests. JSON serialization,

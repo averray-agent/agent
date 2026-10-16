@@ -88,7 +88,7 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
   };
   const gate = new X402VerificationPaymentGate({
     config: config(),
-    provider: { async getNetwork() { return { chainId: 8453n }; }, async getBlockNumber() { return 100; } },
+    provider: { async send(method) { assert.equal(method, "eth_chainId"); return "0x2105"; }, async getBlockNumber() { return 100; } },
     tokenContract,
     captureTokenContract,
     now: () => NOW
@@ -291,12 +291,14 @@ test("X1d admission block read failure is an actionable 503 payment refusal", as
   assert.equal(calls.capture, 0);
 });
 
-test("malformed authorization integers are actionable 402 refusals and transient domain reads retry", async () => {
+test("malformed authorization integers are actionable 402 refusals and transient domain reads retry", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
   const transient = harness({ domainFailures: 1 });
   await assert.rejects(
     () => transient.gate.eip712Domain(),
     (error) => error.statusCode === 503 && error.code === "payment_domain_unavailable"
   );
+  t.mock.timers.tick(1_000);
   assert.equal((await transient.gate.eip712Domain()).name, "USD Coin");
 
   const { gate } = harness();

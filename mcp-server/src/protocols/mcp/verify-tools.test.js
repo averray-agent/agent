@@ -32,7 +32,7 @@ function harness({ balance = BigInt(VERIFY_PROFILE_PRICES[request.profile].amoun
       asset: domain.verifyingContract, payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100 },
+    provider: { send: async (method) => { assert.equal(method, "eth_chainId"); return "0x2105"; }, getBlockNumber: async () => 100 },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain), authorizationState: async () => false,
       balanceOf: async (payer) => { calls.balances.push(payer); if (balanceError) throw balanceError; return balance; } },
     captureTokenContract: { transferWithAuthorization: async () => { calls.captures++; throw new Error("unexpected capture"); } },

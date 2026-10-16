@@ -1,0 +1,42 @@
+[
+  {
+    "mutant": "request-backoff-bypassed",
+    "red": true
+  },
+  {
+    "mutant": "retry-deadline-not-stored",
+    "red": true
+  },
+  {
+    "mutant": "static-network-removed",
+    "red": true
+  },
+  {
+    "mutant": "transport-timeout-removed",
+    "red": true
+  },
+  {
+    "mutant": "ethers-throttle-retry-restored",
+    "red": true
+  },
+  {
+    "mutant": "explicit-chain-check-replaced-by-static-network",
+    "red": true
+  },
+  {
+    "mutant": "card-outage-fallback-removed",
+    "red": true
+  },
+  {
+    "mutant": "structured-gate-logger-bypassed",
+    "red": true
+  },
+  {
+    "mutant": "retry-after-omitted",
+    "red": true
+  },
+  {
+    "mutant": "retry-after-header-removed",
+    "red": true
+  }
+]
