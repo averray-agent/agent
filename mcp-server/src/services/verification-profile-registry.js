@@ -1,13 +1,21 @@
 import { AppError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
 
-export const VERIFY_PROFILE_PRICE = Object.freeze({
-  amount: "5",
-  amountRaw: "5000000",
+const price = (amount, amountRaw) => Object.freeze({
+  amount,
+  amountRaw,
   asset: "USDC",
   decimals: 6,
   network: "eip155:8453",
   billingRule: "inconclusive_not_billed"
+});
+
+// Prices are product policy, not deployment configuration. All consumers use
+// the selected published profile, including discovery and build-time content.
+export const VERIFY_PROFILE_PRICES = Object.freeze({
+  "git-patch-tests-v1": price("5", "5000000"),
+  "mcp-failure-semantics-v1": price("0.25", "250000"),
+  "structured-output-evidence-v1": price("0.25", "250000")
 });
 
 export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
@@ -118,7 +126,7 @@ const GIT_PATCH_TESTS_V1 = {
     temporaryStorageMb: 1024,
     outputLimitBytes: 10 * 1024 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["git-patch-tests-v1"],
   replayFixtureRef: "services/__fixtures__/verifier-replay/deterministic/v1/release-readiness.json",
   status: "published",
   verifierConfig: {
@@ -213,7 +221,7 @@ const MCP_FAILURE_SEMANTICS_V1 = {
     temporaryStorageMb: 16,
     outputLimitBytes: 512 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["mcp-failure-semantics-v1"],
   replayFixtureRef: "services/__fixtures__/mcp-failure-semantics-v1-known-good.json",
   status: "published",
   verifierConfig: {
@@ -296,7 +304,7 @@ const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
     temporaryStorageMb: 32,
     outputLimitBytes: 512 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["structured-output-evidence-v1"],
   replayFixtureRef: "services/__fixtures__/structured-output-evidence-v1-known-good.json",
   status: "published",
   verifierConfig: {

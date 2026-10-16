@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { formatUnits } from "ethers";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
@@ -6,6 +7,7 @@ import { validateAgainstSchemaAll } from "../core/job-schema-validation.js";
 import { buildVerifyReceipt } from "../core/work-receipt.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { MCP_FAILURE_SEMANTICS_PROFILE_REF, VERIFY_INCONCLUSIVE_REASONS } from "./verification-profile-registry.js";
+import { paymentRequiredHeaders } from "../payments/x402-payment-primitives.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const COMPLETE = "complete";
@@ -62,17 +64,35 @@ export class VerificationRunService {
   }
 
   async requireDiscoveryPayment() {
-    // Discovery has no executable input. Quote the published URL-only example
-    // through the same gate, without ever entering createRun/reservation.
-    const [name, version] = MCP_FAILURE_SEMANTICS_PROFILE_REF.split("@");
-    const profile = this.profileRegistry.requireAvailable(name, Number(version));
-    const { target, inputs } = profile.workedExample.request;
-    await this.paymentGate.authorize({
-      price: profile.price,
-      profile: profile.ref,
-      profileLimits: profile.limits,
-      requestHash: hashCanonicalContent({ profile: profile.ref, target, inputs })
-    });
+    // An unbound probe advertises every published example, never a default
+    // price. Availability validation happens before payment intake.
+    const profiles = this.listProfiles().map(({ name, version }) =>
+      this.profileRegistry.requireAvailable(name, version));
+    let challenge;
+    const accepts = [];
+    for (const profile of profiles) {
+      const { target, inputs } = profile.workedExample.request;
+      try {
+        await this.paymentGate.authorize({
+          price: profile.price,
+          profile: profile.ref,
+          profileLimits: profile.limits,
+          requestHash: hashCanonicalContent({ profile: profile.ref, target, inputs })
+        });
+        challenge = undefined;
+        break;
+      } catch (error) {
+        if (error?.statusCode !== 402 || !error.details?.paymentRequired?.accepts?.length) throw error;
+        challenge ??= error;
+        accepts.push(...error.details.paymentRequired.accepts);
+      }
+    }
+    if (challenge) {
+      const envelope = { ...challenge.details.paymentRequired, accepts };
+      challenge.details = { ...challenge.details, paymentRequired: envelope,
+        paymentRequiredHeaders: paymentRequiredHeaders(envelope) };
+      throw challenge;
+    }
     // A demo/custom gate accepting an absent proof must not create a run either.
     throw new AppError("Verify discovery requires a payment challenge; no run was created.", {
       code: "verification_discovery_unavailable", statusCode: 503
@@ -135,7 +155,8 @@ export class VerificationRunService {
       inputs: structuredClone(inputs),
       submittedAt,
       status: "queued",
-      billing: { status: "authorized", amountRaw: profile.price.amountRaw, asset: profile.price.asset }
+      billing: { status: "authorized", amount: profile.price.amount, amountRaw: profile.price.amountRaw,
+        asset: profile.price.asset, network: profile.price.network }
     };
     const reservation = await this.stateStore.reserveVerificationRun(queued, {
       paymentId: paymentKey ?? hashCanonicalContent(authorization.id),
@@ -314,10 +335,12 @@ export class VerificationRunService {
         }
         billing = {
           status: "captured",
-          amount: profile.price.amount,
-          amountRaw: profile.price.amountRaw,
-          asset: profile.price.asset,
-          network: profile.price.network,
+          // The private authorization survives deploys and is the amount the
+          // capture/reconcile path actually paid, even if registry policy changed.
+          amount: formatUnits(authorization.amountRaw, profile.price.decimals).replace(/\.0$/u, ""),
+          amountRaw: authorization.amountRaw,
+          asset: authorization.asset,
+          network: authorization.network,
           transactionHash: capture.transactionHash,
           ...(capture.proof ? { proof: capture.proof } : {})
         };
@@ -433,8 +456,16 @@ export class VerificationRunService {
 }
 
 export function validateVerificationRunRequest(request, profileRegistry) {
-  validateAgainstSchemaAll(request, VERIFY_REQUEST_ENVELOPE_SCHEMA, "verifyRequest");
-  const profile = profileRegistry.requireAvailable(request.profile, request.profileVersion);
+  let profile;
+  try {
+    validateAgainstSchemaAll(request, VERIFY_REQUEST_ENVELOPE_SCHEMA, "verifyRequest");
+    profile = profileRegistry.requireAvailable(request.profile, request.profileVersion);
+  } catch (error) {
+    if (error?.statusCode !== 400 && error?.code !== "verification_profile_not_found") throw error;
+    const profiles = profileRegistry.list().map(({ ref }) => ref);
+    throw new ValidationError(`${error.message} Published profiles: ${profiles.join(", ")}.`,
+      { ...error.details, profiles });
+  }
   validateAgainstSchemaAll(
     { target: request.target, inputs: request.inputs },
     profile.inputSchema,
