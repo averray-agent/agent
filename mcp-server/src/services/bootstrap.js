@@ -830,7 +830,7 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway, undefined, { eventBus, logger })
   );
-  const verificationPaymentGate = initStep(
+  const verificationPaymentGate = await initStepAsync(
     "init-verification-payment-gate",
     logger,
     () => createConfiguredX402VerificationPaymentGate(process.env, { logger })

@@ -137,7 +137,7 @@ export function resolveX402VerificationPaymentConfig(env = process.env) {
   });
 }
 
-export function createConfiguredX402VerificationPaymentGate(
+export async function createConfiguredX402VerificationPaymentGate(
   env = process.env,
   { logger = console, submitter, provider, tokenContract, captureTokenContract, now } = {}
 ) {
@@ -145,7 +145,7 @@ export function createConfiguredX402VerificationPaymentGate(
     const config = resolveX402VerificationPaymentConfig(env);
     if (!config.enabled) return undefined;
     const baseProvider = provider ?? new JsonRpcProvider(config.rpcUrl, config.chainId);
-    return new X402VerificationPaymentGate({
+    const gate = new X402VerificationPaymentGate({
       config,
       provider: baseProvider,
       tokenContract,
@@ -155,6 +155,11 @@ export function createConfiguredX402VerificationPaymentGate(
         : submitter ?? createBaseSubmitter(env, baseProvider, logger),
       now
     });
+    // Validate and cache the token domain before the HTTP listener opens.
+    // No unpaid request should pay the first RPC round trip. A failed/bounded
+    // startup read keeps Verify unavailable, as with invalid configuration.
+    await admissionRead(() => gate.eip712Domain(), "eip712_domain_startup");
+    return gate;
   } catch (error) {
     logger.warn?.(
       { reasonCode: "x402_verify_configuration_unavailable", err: error },

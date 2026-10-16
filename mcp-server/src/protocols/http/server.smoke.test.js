@@ -2946,3 +2946,26 @@ test("http smoke: site signals expose registry prices and robots without auth", 
     assert.equal(await robots.text(), "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
   });
 });
+
+test("http smoke: listing startup warms Base domain and all probes are RPC-free with static ETags", SMOKE_TEST_OPTIONS, async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const temporary = await mkdtemp(resolve(tmpdir(), "listing-smoke-"));
+  try {
+    const output = resolve(temporary, "measurements.json");
+    await promisify(execFile)(process.execPath, ["scripts/ops/measure-verify-listing-internal.mjs", output, "--assert-guards"], {
+      cwd: resolve(moduleDir, "../../../.."), timeout: 12_000, maxBuffer: 1_000_000
+    });
+    const report = JSON.parse(await readFile(output, "utf8"));
+    assert.equal(report.startupRpcCalls, 3);
+    assert.equal(report.rows.length, 4);
+    for (const row of report.rows) {
+      assert.equal(row.samples.length, 20);
+      assert.ok(row.samples.every((sample) => sample.rpcCalls === 0));
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});

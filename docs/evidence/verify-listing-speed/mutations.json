@@ -1,0 +1,42 @@
+[
+  {
+    "mutant": "startup-warm-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-read-per-request",
+    "red": true
+  },
+  {
+    "mutant": "bootstrap-not-awaited",
+    "red": true
+  },
+  {
+    "mutant": "static-build-per-request",
+    "red": true
+  },
+  {
+    "mutant": "json-serialize-per-request",
+    "red": true
+  },
+  {
+    "mutant": "etag-wrong",
+    "red": true
+  },
+  {
+    "mutant": "conditional-get-removed",
+    "red": true
+  },
+  {
+    "mutant": "cache-control-drift",
+    "red": true
+  },
+  {
+    "mutant": "304-content-length-retained",
+    "red": true
+  },
+  {
+    "mutant": "head-body-emitted",
+    "red": true
+  }
+]

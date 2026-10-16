@@ -1341,9 +1341,39 @@
                   "additionalProperties": true
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Representation unchanged; no response body.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return 304 when this cached representation matches the supplied ETag."
+          }
+        ]
       }
     },
     "/openapi.json": {
@@ -1365,9 +1395,39 @@
                   "additionalProperties": true
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Representation unchanged; no response body.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return 304 when this cached representation matches the supplied ETag."
+          }
+        ]
       }
     },
     "/mcp": {
@@ -1564,9 +1624,39 @@
                   "type": "string"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Representation unchanged; no response body.",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 validator for the cached response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return 304 when this cached representation matches the supplied ETag."
+          }
+        ]
       }
     },
     "/.well-known/x402": {

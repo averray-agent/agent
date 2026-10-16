@@ -310,10 +310,10 @@ test("malformed authorization integers are actionable 402 refusals and transient
   );
 });
 
-test("Verify payment config fails closed to the unavailable gate when Base settings are absent", () => {
+test("Verify payment config fails closed to the unavailable gate when Base settings are absent", async () => {
   assert.deepEqual(resolveX402VerificationPaymentConfig({}), { enabled: false, mode: "disabled" });
   const warnings = [];
-  const gate = createConfiguredX402VerificationPaymentGate(
+  const gate = await createConfiguredX402VerificationPaymentGate(
     { X402_VERIFY_MODE: "enabled" },
     { logger: { warn: (...args) => warnings.push(args) } }
   );
@@ -321,9 +321,9 @@ test("Verify payment config fails closed to the unavailable gate when Base setti
   assert.equal(warnings.length, 1);
 });
 
-test("configured factory wires the Base gate without importing the Hub gateway or settlement adapter", () => {
+test("configured factory wires the Base gate without importing the Hub gateway or settlement adapter", async () => {
   const { gate: fixture } = harness();
-  const configured = createConfiguredX402VerificationPaymentGate({
+  const configured = await createConfiguredX402VerificationPaymentGate({
     X402_VERIFY_MODE: "enabled",
     X402_PAYMENT_NETWORK: "eip155:8453",
     BASE_RPC_URL: "https://base.example.test",
