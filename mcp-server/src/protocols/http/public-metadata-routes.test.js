@@ -194,7 +194,7 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   });
   assert.ok(response.body.endpoints.includes("/status/providers") === false);
   assert.deepEqual(calls, [
-    ["respond", { statusCode: 200, body: response.body, headers: {} }],
+    ["respond", { statusCode: 200, body: response.body, headers: response.headers }],
   ]);
 });
 
@@ -385,7 +385,7 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   assert.deepEqual(calls, [["respondText", {
     statusCode: 200,
     body: response.body,
-    headers: { "cache-control": "public, max-age=300" }
+    headers: response.headers
   }]]);
 });
 

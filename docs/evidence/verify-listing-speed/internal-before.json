@@ -1,0 +1,535 @@
+{
+  "measured_at": "2026-10-16T20:47:06.352Z",
+  "base_sha": "ce811b58",
+  "method": "20 sequential real HTTP requests per path; per-request delta of existing http_request_duration_ms_sum; integer ms; local memory store and deterministic loopback Base RPC; no warmup",
+  "startupRpcCalls": 0,
+  "rows": [
+    {
+      "path": "/",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 2,
+      "max_ms": 3,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 3.2347920000001977,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 1.4055410000000848,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 1.5213749999998072,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 3,
+          "total_ms": 6.783457999999882,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6237499999997453,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.5296250000001237,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6299579999999878,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.5511670000000777,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6517079999998714,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0519999999996799,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.5884999999998399,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.8015409999998155,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.42458299999998417,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.3541660000000775,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.40904100000034305,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.40037500000016735,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.3232499999999163,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.062750000000051,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.42275000000017826,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.9437500000003638,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/verify/runs",
+      "method": "POST",
+      "n": 20,
+      "p50_ms": 1,
+      "p95_ms": 20,
+      "max_ms": 21,
+      "samples": [
+        {
+          "status": 402,
+          "internal_ms": 21,
+          "total_ms": 23.589124999999967,
+          "rpcCalls": 3
+        },
+        {
+          "status": 402,
+          "internal_ms": 2,
+          "total_ms": 4.208125000000109,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 2,
+          "total_ms": 3.4019170000001395,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 2.159958000000188,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.230833999999959,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 2.492500000000291,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 2.254167000000052,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 1.8247919999998885,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 2.0674590000003263,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 20,
+          "total_ms": 41.581916999999976,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 4.454999999999927,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 5.799666999999772,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.9767910000000484,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 2.993084000000181,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.3842079999999441,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 5,
+          "total_ms": 8.865458000000217,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.6670830000002752,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.2214579999999842,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 2,
+          "total_ms": 2.980000000000018,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.1876670000001468,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/openapi.json",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 1,
+      "p95_ms": 2,
+      "max_ms": 4,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 4,
+          "total_ms": 5.393708000000061,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.00137500000028,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.0788330000000315,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 2.501042000000325,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.150916999999936,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.5201670000001286,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 4.175083000000086,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 2.6638749999997344,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 1.9249580000000606,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.4274999999997817,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 3.6803749999999127,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 2.8001250000002074,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 3.6657499999996617,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 4.886167000000114,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 4.656292000000121,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 2.830333999999766,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 2.575166000000081,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 1.7764999999999418,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 1,
+          "total_ms": 1.9879169999999249,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 3.3711249999996653,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/llms.txt",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 0,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.8192089999997734,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.5554159999996955,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.3967910000001211,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6556249999998727,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.1965000000000146,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6989590000002863,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6337499999999636,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6087499999998727,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.44766699999991033,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 2.4932079999998678,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.9636669999999867,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.001625000000331,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.4281250000003638,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.5569169999998849,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.7286250000001928,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.949500000000171,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.77475000000004,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.7423749999998108,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.8229999999998654,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.3641669999997248,
+          "rpcCalls": 0
+        }
+      ]
+    }
+  ],
+  "source_sha256": {
+    "mcp-server/src/payments/x402-verification-payment-gate.js": "fa37285633ea9c668fa881f9ee3f83df63c106b345bedd25b6715d8ed452232b",
+    "mcp-server/src/services/bootstrap.js": "94f9c8c171d29515c39d2a74e499473e92496ddd42e8f55caab7ed569c7e7887",
+    "mcp-server/src/protocols/http/public-metadata-routes.js": "7fe8abed9fd2fc19f02b3a1c374c5337d03653d70c1f416a0005331d1d4dac59",
+    "mcp-server/src/protocols/http/http-helpers.js": "39155fc13b9dbbb9a7b151c783d7f59139c71b6f6ce4484ab1f2ecbe4218ae72",
+    "docs/api/openapi.json": "dbc7d4ba84a9cfd9377cb80f6b07a8a9478ef0886e717d9fe4b1fc15e8be3e87"
+  }
+}

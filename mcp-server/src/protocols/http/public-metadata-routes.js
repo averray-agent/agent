@@ -1,3 +1,4 @@
+import { createCachedMetadata, matchesEntityTag } from "./static-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 import {
   EARNINGS_WITHDRAWAL_STATEMENT,
@@ -169,8 +170,50 @@ Use Averray when you need a wallet-authenticated platform where software agents 
 `;
 }
 
+export function buildRootMetadata({ authConfig = {}, metadataBaseUrl, badgeReceiptJwksUrl }) {
+  return {
+    name: "Averray",
+    site: SITE_URL,
+    docs: DOCS_URL,
+    llmsTxt: `${metadataBaseUrl}/llms.txt`,
+    status: "ok",
+    authMode: authConfig.mode,
+    receiptVerification: {
+      badgeReceipts: {
+        alg: "ES256",
+        kid: "badge-1",
+        jwksUrl: badgeReceiptJwksUrl,
+        canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
+      },
+      runReceipts: {
+        alg: "ES256",
+        kid: "badge-1",
+        jwksUrl: badgeReceiptJwksUrl,
+        canonicalPath: "/badges/:sessionId/run",
+        schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
+        canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
+      },
+      workReceipts: {
+        alg: "ES256",
+        kid: "badge-1",
+        jwksUrl: badgeReceiptJwksUrl,
+        canonicalPath: "/receipts/:receiptId",
+        publicPage: `${SITE_URL}/receipts/:receiptId`,
+        schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+        responseSchema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
+        signedDocumentPath: "document",
+        canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
+      }
+    },
+    endpoints: ROOT_ENDPOINTS
+  };
+}
+
 export function createPublicMetadataRoutes({
   authConfig,
+  buildRoot = buildRootMetadata,
+  readOpenApi = readPublicOpenApi,
+  buildLlms = buildAgentLlmsText,
   buildDiscoveryManifest,
   getX402Discovery,
   listVerificationProfiles,
@@ -190,49 +233,26 @@ export function createPublicMetadataRoutes({
     ? `${normalizedPublicBaseUrl}${BADGE_RECEIPT_JWKS_PATH}`
     : BADGE_RECEIPT_JWKS_PATH;
 
-  return async function handlePublicMetadataRoute({ request, response, pathname }) {
-    if (request.method === "GET" && pathname === "/") {
-      respond(response, 200, {
-        name: "Averray",
-        site: SITE_URL,
-        docs: DOCS_URL,
-        llmsTxt: `${metadataBaseUrl}/llms.txt`,
-        status: "ok",
-        authMode: authConfig.mode,
-        receiptVerification: {
-          badgeReceipts: {
-            alg: "ES256",
-            kid: "badge-1",
-            jwksUrl: badgeReceiptJwksUrl,
-            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/agent-badge-v1.md#exact-canonicalization-and-signing-bytes"
-          },
-          runReceipts: {
-            alg: "ES256",
-            kid: "badge-1",
-            jwksUrl: badgeReceiptJwksUrl,
-            canonicalPath: "/badges/:sessionId/run",
-            schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
-            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
-          },
-          workReceipts: {
-            alg: "ES256",
-            kid: "badge-1",
-            jwksUrl: badgeReceiptJwksUrl,
-            canonicalPath: "/receipts/:receiptId",
-            publicPage: `${SITE_URL}/receipts/:receiptId`,
-            schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
-            responseSchema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
-            signedDocumentPath: "document",
-            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
-          }
-        },
-        endpoints: ROOT_ENDPOINTS
-      });
-      return true;
-    }
+  // The HTTP server constructs this router once. Builders and serialization
+  // are shared by concurrent cold requests and reused until process restart.
+  const staticRoutes = new Map([
+    ["/", createCachedMetadata(() => buildRoot({ authConfig, metadataBaseUrl, badgeReceiptJwksUrl }))],
+    ["/openapi.json", createCachedMetadata(readOpenApi)],
+    ["/llms.txt", createCachedMetadata(() => buildLlms({ publicBaseUrl: metadataBaseUrl }), { json: false })]
+  ]);
 
-    if (request.method === "GET" && pathname === "/openapi.json") {
-      respond(response, 200, await readPublicOpenApi(), { "cache-control": "public, max-age=300" });
+  return async function handlePublicMetadataRoute({ request, response, pathname }) {
+    const cached = request.method === "GET" && staticRoutes.get(pathname);
+    if (cached) {
+      const { payload, body, headers, json } = await cached();
+      if (matchesEntityTag(request.headers?.["if-none-match"], headers.etag)) {
+        const { "content-length": _length, ...validationHeaders } = headers;
+        respondText(response, 304, "", validationHeaders);
+      } else if (json) {
+        respond(response, 200, payload, headers, { serializedBody: body });
+      } else {
+        respondText(response, 200, body, headers);
+      }
       return true;
     }
 
@@ -243,16 +263,6 @@ export function createPublicMetadataRoutes({
 
     if (request.method === "GET" && pathname === "/pricing") {
       respond(response, 200, buildVerifyPricing(listVerificationProfiles?.()));
-      return true;
-    }
-
-    if (request.method === "GET" && pathname === "/llms.txt") {
-      respondText(
-        response,
-        200,
-        buildAgentLlmsText({ publicBaseUrl: metadataBaseUrl }),
-        { "cache-control": "public, max-age=300" }
-      );
       return true;
     }
 
@@ -333,10 +343,14 @@ export function createPublicMetadataRoutes({
         chainId: authConfig?.chainId,
         minimumRewardUsdc
       });
+      const pricing = await Promise.resolve().then(() => getX402Discovery()).catch((error) => {
+        if (error?.code !== "payment_domain_unavailable") throw error;
+        return { status: "unavailable" };
+      });
       respond(
         response,
         200,
-        buildDiscoveryAlias(manifest, await getX402Discovery(), {
+        buildDiscoveryAlias(manifest, pricing, {
           card: pathname === "/.well-known/agent-card.json"
         }),
         { "cache-control": "no-store" }

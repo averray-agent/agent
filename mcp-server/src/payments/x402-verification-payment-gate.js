@@ -1,5 +1,6 @@
 import {
   Contract,
+  FetchRequest,
   Interface,
   JsonRpcProvider,
   Signature,
@@ -11,6 +12,7 @@ import {
 } from "ethers";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import { createLogger } from "../core/logger.js";
 import { AppError, ConfigError } from "../core/errors.js";
 import { KmsSigner } from "../blockchain/kms-signer.js";
 import {
@@ -31,6 +33,22 @@ export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
 const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
 const ADMISSION_READ_TIMEOUT_MS = 8_000;
+
+function createBasePaymentProvider(config, logger, { fast = true } = {}) {
+  const request = new FetchRequest(config.rpcUrl);
+  if (fast) {
+    request.timeout = 8_000;
+    // The gate owns domain retries; ethers must not add a throttle loop.
+    request.setThrottleParams({ maxAttempts: 1 });
+  }
+  // Capture/broadcast/reconciliation retain ethers' transport defaults:
+  // 300-second timeout and up to 12 attempts, including throttle retries.
+  const provider = new JsonRpcProvider(request, config.chainId, { staticNetwork: true });
+  provider.on("error", (error) => logger.warn?.(
+    { reasonCode: "verify_base_provider_error", code: error.code }, "verification_payment_gate.provider_error"
+  ));
+  return provider;
+}
 
 async function admissionRead(read, reason) {
   let timer;
@@ -137,24 +155,31 @@ export function resolveX402VerificationPaymentConfig(env = process.env) {
   });
 }
 
-export function createConfiguredX402VerificationPaymentGate(
+export async function createConfiguredX402VerificationPaymentGate(
   env = process.env,
-  { logger = console, submitter, provider, tokenContract, captureTokenContract, now } = {}
+  { logger = createLogger({ name: "verify-payment", level: env.LOG_LEVEL }), submitter, provider, captureProvider, tokenContract, captureTokenContract, now } = {}
 ) {
   try {
     const config = resolveX402VerificationPaymentConfig(env);
     if (!config.enabled) return undefined;
-    const baseProvider = provider ?? new JsonRpcProvider(config.rpcUrl, config.chainId);
-    return new X402VerificationPaymentGate({
+    const baseProvider = provider ?? createBasePaymentProvider(config, logger);
+    const baseCaptureProvider = captureProvider ?? provider ?? createBasePaymentProvider(config, logger, { fast: false });
+    const gate = new X402VerificationPaymentGate({
       config,
       provider: baseProvider,
+      captureProvider: baseCaptureProvider,
       tokenContract,
       captureTokenContract,
       submitter: captureTokenContract
         ? submitter
-        : submitter ?? createBaseSubmitter(env, baseProvider, logger),
-      now
+        : submitter ?? createBaseSubmitter(env, baseCaptureProvider, logger),
+      now,
+      logger
     });
+    // Warm before listening, but retain the configured gate (including capture
+    // reconciliation) through an RPC outage. Domain reads own bounded retries.
+    await gate.eip712Domain().catch(() => {});
+    return gate;
   } catch (error) {
     logger.warn?.(
       { reasonCode: "x402_verify_configuration_unavailable", err: error },
@@ -168,21 +193,34 @@ export class X402VerificationPaymentGate {
   constructor({
     config,
     provider,
+    captureProvider,
     tokenContract,
     captureTokenContract,
     submitter,
-    now = () => new Date()
+    now = () => new Date(),
+    logger = createLogger({ name: "verify-payment", level: process.env.LOG_LEVEL })
   } = {}) {
     if (!config?.enabled) throw new ConfigError("X402VerificationPaymentGate requires enabled configuration.");
     this.config = config;
-    this.provider = provider ?? new JsonRpcProvider(config.rpcUrl, config.chainId);
+    this.logger = logger;
+    this.provider = provider ?? createBasePaymentProvider(config, logger);
     this.token = tokenContract ?? new Contract(config.asset, TOKEN_ABI, this.provider);
+    // Explicitly injected single-provider fixtures retain their existing wiring.
+    // Production always owns separate fast admission and default capture lanes.
+    this.captureProvider = captureProvider ?? provider ?? createBasePaymentProvider(config, logger, { fast: false });
+    this.captureReadToken = this.captureProvider === this.provider
+      ? this.token : new Contract(config.asset, TOKEN_ABI, this.captureProvider);
     if (!captureTokenContract && !submitter) {
       throw new ConfigError("X402VerificationPaymentGate requires a Base transaction submitter.");
     }
     this.captureToken = captureTokenContract ?? new Contract(config.asset, TOKEN_ABI, submitter);
     this.now = now;
     this.domainPromise = undefined;
+    this.domainReady = false;
+    this.domainError = undefined;
+    this.domainRetryDelayMs = 1_000;
+    this.domainNextAttemptAt = 0;
+    this.domainRetryTimer = undefined;
   }
 
   async authorize({ paymentProof, price, profile, profileLimits, requestHash, findExistingRun } = {}) {
@@ -337,7 +375,7 @@ export class X402VerificationPaymentGate {
   }
 
   async prepareCapture() {
-    return { fromBlock: await this.provider.getBlockNumber() };
+    return { fromBlock: await this.captureProvider.getBlockNumber() };
   }
 
   async capture({ authorization, onBroadcast }) {
@@ -371,7 +409,7 @@ export class X402VerificationPaymentGate {
   async reconcileCapture({ authorization, pendingTransactionHash, fromBlock, captureScanNextBlock }) {
     let pendingKnown = false;
     if (pendingTransactionHash) {
-      const receipt = await this.provider.getTransactionReceipt(pendingTransactionHash);
+      const receipt = await this.captureProvider.getTransactionReceipt(pendingTransactionHash);
       pendingKnown = !receipt;
       if (receipt && Number(receipt.status) === 1) {
         return { status: "captured", transactionHash: pendingTransactionHash, proof: "reconciled_from_chain" };
@@ -385,11 +423,11 @@ export class X402VerificationPaymentGate {
     const proof = authorization.authorization;
     const legacy = !Number.isSafeInteger(authorization.authorizedAtBlock);
     const firstBlock = legacy ? fromBlock : authorization.authorizedAtBlock;
-    const latest = await this.provider.getBlock("latest");
+    const latest = await this.captureProvider.getBlock("latest");
     if (!latest || !Number.isSafeInteger(latest.number) || !Number.isSafeInteger(latest.timestamp)) {
       throw Object.assign(new Error("Base block unavailable."), { code: "capture_block_unavailable" });
     }
-    const used = await this.token.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
+    const used = await this.captureReadToken.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
     if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
     if (!Number.isSafeInteger(firstBlock) || firstBlock < 0 || latest.number < firstBlock) {
       throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
@@ -405,7 +443,7 @@ export class X402VerificationPaymentGate {
     const abi = new Interface(TOKEN_ABI);
     const events = [];
     for (let start = scanFrom; start <= scanEnd; start += 1_000) {
-      events.push(...await this.provider.getLogs({
+      events.push(...await this.captureProvider.getLogs({
         address: this.config.asset, fromBlock: start, toBlock: Math.min(scanEnd, start + 999),
         topics: [
           [abi.getEvent("AuthorizationUsed").topicHash, abi.getEvent("AuthorizationCanceled").topicHash],
@@ -419,7 +457,7 @@ export class X402VerificationPaymentGate {
       if (!parsed || parsed.args.authorizer.toLowerCase() !== proof.from.toLowerCase()
         || parsed.args.nonce.toLowerCase() !== proof.nonce.toLowerCase()) continue;
       if (parsed.name === "AuthorizationCanceled") return { status: "cancelled" };
-      const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+      const receipt = await this.captureProvider.getTransactionReceipt(event.transactionHash);
       if (!receipt || Number(receipt.status) !== 1) return { status: "pending" };
       const transfer = receipt.logs.some((log) => {
         if (log.address.toLowerCase() !== this.config.asset.toLowerCase()) return false;
@@ -444,47 +482,103 @@ export class X402VerificationPaymentGate {
     return { submitted: false };
   }
 
+  getDomainWarnings() {
+    return this.domainReady ? [] : [{
+      code: "verify_payment_domain_unavailable", severity: "warning",
+      retryable: this.domainError?.details?.retryable ?? true
+    }];
+  }
+
   async eip712Domain() {
-    this.domainPromise ??= this.readEip712Domain().catch((error) => {
-      this.domainPromise = undefined;
-      throw error;
-    });
+    // A deterministic identity mismatch requires operator correction/restart.
+    if (this.domainError?.details?.retryable === false) throw this.domainError;
+    if (!this.domainPromise) {
+      if (this.domainError && Date.now() < this.domainNextAttemptAt) {
+        this.domainError.details.retryAfterSeconds = Math.ceil((this.domainNextAttemptAt - Date.now()) / 1_000);
+        throw this.domainError;
+      }
+      clearTimeout(this.domainRetryTimer);
+      this.domainRetryTimer = undefined;
+      this.domainPromise = admissionRead(() => this.readEip712Domain(), "eip712_domain")
+        .then((domain) => {
+          this.domainReady = true;
+          if (this.domainError) this.logger.info?.(
+            { reasonCode: "verify_payment_domain_recovered" }, "verification_payment_gate.domain_recovered"
+          );
+          this.domainError = undefined;
+          this.domainNextAttemptAt = 0;
+          this.domainRetryDelayMs = 1_000;
+          return domain;
+        }).catch((cause) => {
+          this.domainPromise = undefined;
+          this.domainReady = false;
+          const retryable = cause?.code !== "payment_domain_mismatch"
+            && !(cause?.code === "NETWORK_ERROR" && cause?.event === "changed");
+          this.domainError = new AppError(
+            "Verify payment domain validation is unavailable. No work was admitted and no money moved.",
+            { code: "payment_domain_unavailable", statusCode: 503, details: {
+              status: "unavailable", retryable, customerFunds: "unchanged",
+              ...(retryable ? { retryAfterSeconds: this.domainRetryDelayMs / 1_000 } : {}),
+              action: retryable ? "retry_when_base_domain_reads_recover" : "operator_check_payment_domain"
+            } }
+          );
+          this.logger.warn?.(
+            { reasonCode: "verify_payment_domain_unavailable", err: this.domainError,
+              cause: { code: cause?.code, message: cause?.shortMessage ?? cause?.message ?? String(cause),
+                statusCode: cause?.response?.statusCode ?? cause?.statusCode,
+                responseStatus: cause?.info?.responseStatus } },
+            "verification_payment_gate.domain_unavailable"
+          );
+          if (retryable) {
+            // Both requests and the background worker obey the same deadline.
+            // Attempts back off 1, 2, 4, ... 30 seconds and share in-flight reads.
+            this.domainNextAttemptAt = Date.now() + this.domainRetryDelayMs;
+            this.domainRetryTimer = setTimeout(() => {
+              // Node's timer clock can fire just before the wall-clock deadline.
+              // The timer already waited the backoff; never let it kill its own
+              // retry chain on the request-only deadline check.
+              this.domainNextAttemptAt = 0;
+              void this.eip712Domain().catch(() => {});
+            }, this.domainRetryDelayMs);
+            this.domainRetryTimer.unref?.();
+            this.domainRetryDelayMs = Math.min(this.domainRetryDelayMs * 2, 30_000);
+          }
+          throw this.domainError;
+        });
+    }
     return this.domainPromise;
   }
 
+  close() {
+    clearTimeout(this.domainRetryTimer);
+  }
+
   async readEip712Domain() {
-    try {
-      const [network, liveName, onchainSeparator] = await Promise.all([
-        this.provider.getNetwork(),
-        this.token.name(),
-        this.token.DOMAIN_SEPARATOR()
-      ]);
-      if (BigInt(network.chainId) !== BigInt(this.config.chainId)) {
-        throw new Error(`Base RPC returned chainId ${network.chainId}.`);
-      }
-      if (String(liveName) !== this.config.assetEip712Name) {
-        throw new Error(
-          `Configured EIP-712 name ${JSON.stringify(this.config.assetEip712Name)} does not match token name() ${JSON.stringify(liveName)}.`
-        );
-      }
-      const domain = Object.freeze({
-        name: String(liveName),
-        version: this.config.assetEip712Version,
-        chainId: this.config.chainId,
-        verifyingContract: this.config.asset
-      });
-      const reproduced = TypedDataEncoder.hashDomain(domain);
-      if (!BYTES32_RE.test(String(onchainSeparator)) || reproduced.toLowerCase() !== String(onchainSeparator).toLowerCase()) {
-        throw new Error("Token name(), version, chainId, and address do not reproduce DOMAIN_SEPARATOR().");
-      }
-      return domain;
-    } catch (error) {
-      throw new PaymentVerificationError(
-        `Averray could not reproduce the Base token's EIP-712 domain from name(): ${error?.message ?? String(error)} No work ran and no money moved.`,
-        "payment_domain_unavailable",
-        { action: "retry_when_base_domain_reads_recover", customerFunds: "unchanged" }
+    const [chainId, liveName, onchainSeparator] = await Promise.all([
+      this.provider.send("eth_chainId", []),
+      this.token.name(),
+      this.token.DOMAIN_SEPARATOR()
+    ]);
+    const mismatch = (message) => new AppError(message, { code: "payment_domain_mismatch" });
+    if (BigInt(chainId) !== BigInt(this.config.chainId)) {
+      throw mismatch(`Base RPC returned chainId ${chainId}.`);
+    }
+    if (String(liveName) !== this.config.assetEip712Name) {
+      throw mismatch(
+        `Configured EIP-712 name ${JSON.stringify(this.config.assetEip712Name)} does not match token name() ${JSON.stringify(liveName)}.`
       );
     }
+    const domain = Object.freeze({
+      name: String(liveName),
+      version: this.config.assetEip712Version,
+      chainId: this.config.chainId,
+      verifyingContract: this.config.asset
+    });
+    const reproduced = TypedDataEncoder.hashDomain(domain);
+    if (!BYTES32_RE.test(String(onchainSeparator)) || reproduced.toLowerCase() !== String(onchainSeparator).toLowerCase()) {
+      throw mismatch("Token name(), version, chainId, and address do not reproduce DOMAIN_SEPARATOR().");
+    }
+    return domain;
   }
 
   paymentRequirements({ domain, price, profile, profileLimits, requestHash }) {

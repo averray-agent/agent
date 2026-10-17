@@ -28,7 +28,7 @@ function discoveryHarness({ availabilityByProfile = {}, enforceLimit = async () 
       asset: domain.verifyingContract, payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }) },
+    provider: { send: async (method) => { assert.equal(method, "eth_chainId"); return "0x2105"; } },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain) },
     captureTokenContract: { transferWithAuthorization: async () => { calls.capture++; throw new Error("unexpected capture"); } }
   });
