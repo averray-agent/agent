@@ -651,6 +651,11 @@
     },
     {
       "method": "GET",
+      "path": "/terms",
+      "description": "Redirect to the Averray Verify terms of use."
+    },
+    {
+      "method": "GET",
       "path": "/pricing",
       "description": "Verify prices projected from the published profile registry and a link to the pricing page."
     },

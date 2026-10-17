@@ -515,17 +515,17 @@ test("site signals: robots permits public crawling, and excludes admin", async (
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
   assert.equal(response.body, "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
-  for (const pathname of ["/robots.txt", "/pricing"]) {
+  for (const pathname of ["/robots.txt", "/pricing", "/terms"]) {
     assert.equal(await route({ request: { method: "POST" }, response, pathname }), false);
   }
 });
 
-test("site signals: root, metrics, discovery and OpenAPI retain both public reads", async () => {
+test("site signals: root, metrics, discovery and OpenAPI retain all public reads", async () => {
   const { route, response } = makeHarness();
   await route({ request: { method: "GET" }, response, pathname: "/" });
   const manifest = buildDiscoveryManifest();
   const document = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
-  for (const path of ["/robots.txt", "/pricing"]) {
+  for (const path of ["/robots.txt", "/pricing", "/terms"]) {
     assert.ok(response.body.endpoints.includes(path), `root: ${path}`);
     assert.equal(metricPathLabel(path), path, `metrics: ${path}`);
     assert.ok(manifest.publicEndpoints.some((p) => p.method === "GET" && p.path === path), `discovery: ${path}`);
@@ -543,7 +543,30 @@ test("site signals: API llms includes pricing links on the configured host", asy
   const { route, response } = makeHarness({ publicBaseUrl: "https://api.example.test/" });
   await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
   for (const required of ["## Pricing", "https://api.example.test/pricing",
-    "https://averray.com/pricing/", "No verdict, no charge. Inconclusive runs are not billed."]) {
+    "https://averray.com/pricing/", "## Terms", "https://averray.com/terms/", "https://api.example.test/terms", "No verdict, no charge. Inconclusive runs are not billed."]) {
     assert.ok(response.body.includes(required), required);
   }
+});
+
+
+test("terms: public API redirects to the canonical terms without approval-status wording", async () => {
+  const { route, response } = makeHarness();
+  assert.equal(await route({ request: { method: "GET" }, response, pathname: "/terms" }), true);
+  assert.equal(response.statusCode, 302);
+  assert.equal(response.headers.location, "https://averray.com/terms/");
+  assert.equal(response.body, "");
+  assert.equal(await route({ request: { method: "POST" }, response, pathname: "/terms" }), false);
+  await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
+  assert.doesNotMatch(response.body.split("## Terms")[1], /\b(?:draft|not approved|proposed|pending)\b/iu);
+  const document = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  assert.equal(document.paths["/terms"].get.responses["302"].headers.Location.schema.const, "https://averray.com/terms/");
+});
+
+
+test("terms: PUBLIC_COMPANIONS still requires the operation if discovery omits it", () => {
+  const document = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  delete document.paths["/terms"];
+  const manifest = buildDiscoveryManifest();
+  manifest.publicEndpoints = manifest.publicEndpoints.filter(({ path }) => path !== "/terms");
+  assert.ok(publicOpenApiErrors(document, { manifest }).some((error) => error.includes("/terms")));
 });
