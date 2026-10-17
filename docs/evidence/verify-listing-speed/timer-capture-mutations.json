@@ -1,0 +1,54 @@
+[
+  {
+    "mutant": "early-timer-window-bypass-removed",
+    "red": true
+  },
+  {
+    "mutant": "factory-capture-provider-fast",
+    "red": true
+  },
+  {
+    "mutant": "direct-capture-provider-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-transport-defaults-removed",
+    "red": true
+  },
+  {
+    "mutant": "capture-signer-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-checkpoint-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-pending-receipt-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-event-receipt-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-block-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-nonce-fast",
+    "red": true
+  },
+  {
+    "mutant": "capture-logs-fast",
+    "red": true
+  },
+  {
+    "mutant": "domain-cause-hidden",
+    "red": true
+  },
+  {
+    "mutant": "domain-http-status-hidden",
+    "red": true
+  }
+]

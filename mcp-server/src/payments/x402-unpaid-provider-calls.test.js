@@ -100,6 +100,9 @@ for (const mismatch of ["chain", "provider-chain", "name", "separator"]) {
     t.after(() => gate?.close());
     assert.ok(gate, "valid config must retain its gate");
     assert.equal(f.warnings.length, 1);
+    assert.match(f.warnings[0][0].cause.message, mismatch === "chain" ? /chainId 1/u
+      : mismatch === "name" ? /does not match token name/u
+        : mismatch === "separator" ? /DOMAIN_SEPARATOR/u : /network changed/u);
     const reads = f.calls.length;
     f.options.provider.send = async () => assert.fail("identity mismatch must not retry");
     for (let i = 0; i < 3; i++) {
@@ -184,6 +187,8 @@ test("listing startup domain timeout is bounded to eight seconds and recovers", 
   assert.ok(gate);
   assert.equal(f.warnings[0][0].err.code, "payment_domain_unavailable");
   assert.equal(f.warnings[0][0].err.statusCode, 503);
+  assert.equal(f.warnings[0][0].cause.code, "payment_chain_read_timeout");
+  assert.match(f.warnings[0][0].cause.message, /timed out/u);
   down = false;
   t.mock.timers.tick(1_000); await new Promise(setImmediate);
   assert.deepEqual(gate.getDomainWarnings(), []);
@@ -225,4 +230,31 @@ test("listing request bursts obey the deadline; first request after it starts ex
   release({ chainId: 8453n });
   for (const value of await Promise.all(pending)) assert.deepEqual(value, domain);
   assert.deepEqual(gate.getDomainWarnings(), []);
+});
+
+
+test("listing early background timers bypass the wall-clock window, reschedule and recover without requests", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let wallTime = 1_000_000, down = true;
+  t.mock.method(Date, "now", () => wallTime);
+  const f = fixture({ network: async () => {
+    if (down) throw new Error("RPC unavailable");
+    return { chainId: 8453n };
+  } });
+  const gate = await createConfiguredX402VerificationPaymentGate(env, f.options);
+  t.after(() => gate.close());
+  let attempts = 1;
+  for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+    wallTime += delay - 1;
+    t.mock.timers.tick(delay);
+    await new Promise(setImmediate);
+    assert.equal(f.calls.filter((call) => call === "eth_chainId").length, ++attempts,
+      "timer fires 1 ms before the wall deadline and must still retry and reschedule");
+  }
+  down = false;
+  wallTime += 30_000 - 1;
+  t.mock.timers.tick(30_000);
+  await new Promise(setImmediate);
+  assert.deepEqual(gate.getDomainWarnings(), []);
+  assert.equal(f.calls.filter((call) => call === "eth_chainId").length, ++attempts);
 });

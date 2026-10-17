@@ -34,12 +34,15 @@ export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
 const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
 const ADMISSION_READ_TIMEOUT_MS = 8_000;
 
-function createBasePaymentProvider(config, logger) {
+function createBasePaymentProvider(config, logger, { fast = true } = {}) {
   const request = new FetchRequest(config.rpcUrl);
-  request.timeout = 8_000;
-  // The gate owns retries. In particular, HTTP 429 must not start ethers'
-  // independent throttle loop on top of the domain backoff.
-  request.setThrottleParams({ maxAttempts: 1 });
+  if (fast) {
+    request.timeout = 8_000;
+    // The gate owns domain retries; ethers must not add a throttle loop.
+    request.setThrottleParams({ maxAttempts: 1 });
+  }
+  // Capture/broadcast/reconciliation retain ethers' transport defaults:
+  // 300-second timeout and up to 12 attempts, including throttle retries.
   const provider = new JsonRpcProvider(request, config.chainId, { staticNetwork: true });
   provider.on("error", (error) => logger.warn?.(
     { reasonCode: "verify_base_provider_error", code: error.code }, "verification_payment_gate.provider_error"
@@ -154,20 +157,22 @@ export function resolveX402VerificationPaymentConfig(env = process.env) {
 
 export async function createConfiguredX402VerificationPaymentGate(
   env = process.env,
-  { logger = createLogger({ name: "verify-payment", level: env.LOG_LEVEL }), submitter, provider, tokenContract, captureTokenContract, now } = {}
+  { logger = createLogger({ name: "verify-payment", level: env.LOG_LEVEL }), submitter, provider, captureProvider, tokenContract, captureTokenContract, now } = {}
 ) {
   try {
     const config = resolveX402VerificationPaymentConfig(env);
     if (!config.enabled) return undefined;
     const baseProvider = provider ?? createBasePaymentProvider(config, logger);
+    const baseCaptureProvider = captureProvider ?? provider ?? createBasePaymentProvider(config, logger, { fast: false });
     const gate = new X402VerificationPaymentGate({
       config,
       provider: baseProvider,
+      captureProvider: baseCaptureProvider,
       tokenContract,
       captureTokenContract,
       submitter: captureTokenContract
         ? submitter
-        : submitter ?? createBaseSubmitter(env, baseProvider, logger),
+        : submitter ?? createBaseSubmitter(env, baseCaptureProvider, logger),
       now,
       logger
     });
@@ -188,6 +193,7 @@ export class X402VerificationPaymentGate {
   constructor({
     config,
     provider,
+    captureProvider,
     tokenContract,
     captureTokenContract,
     submitter,
@@ -199,6 +205,11 @@ export class X402VerificationPaymentGate {
     this.logger = logger;
     this.provider = provider ?? createBasePaymentProvider(config, logger);
     this.token = tokenContract ?? new Contract(config.asset, TOKEN_ABI, this.provider);
+    // Explicitly injected single-provider fixtures retain their existing wiring.
+    // Production always owns separate fast admission and default capture lanes.
+    this.captureProvider = captureProvider ?? provider ?? createBasePaymentProvider(config, logger, { fast: false });
+    this.captureReadToken = this.captureProvider === this.provider
+      ? this.token : new Contract(config.asset, TOKEN_ABI, this.captureProvider);
     if (!captureTokenContract && !submitter) {
       throw new ConfigError("X402VerificationPaymentGate requires a Base transaction submitter.");
     }
@@ -364,7 +375,7 @@ export class X402VerificationPaymentGate {
   }
 
   async prepareCapture() {
-    return { fromBlock: await this.provider.getBlockNumber() };
+    return { fromBlock: await this.captureProvider.getBlockNumber() };
   }
 
   async capture({ authorization, onBroadcast }) {
@@ -398,7 +409,7 @@ export class X402VerificationPaymentGate {
   async reconcileCapture({ authorization, pendingTransactionHash, fromBlock, captureScanNextBlock }) {
     let pendingKnown = false;
     if (pendingTransactionHash) {
-      const receipt = await this.provider.getTransactionReceipt(pendingTransactionHash);
+      const receipt = await this.captureProvider.getTransactionReceipt(pendingTransactionHash);
       pendingKnown = !receipt;
       if (receipt && Number(receipt.status) === 1) {
         return { status: "captured", transactionHash: pendingTransactionHash, proof: "reconciled_from_chain" };
@@ -412,11 +423,11 @@ export class X402VerificationPaymentGate {
     const proof = authorization.authorization;
     const legacy = !Number.isSafeInteger(authorization.authorizedAtBlock);
     const firstBlock = legacy ? fromBlock : authorization.authorizedAtBlock;
-    const latest = await this.provider.getBlock("latest");
+    const latest = await this.captureProvider.getBlock("latest");
     if (!latest || !Number.isSafeInteger(latest.number) || !Number.isSafeInteger(latest.timestamp)) {
       throw Object.assign(new Error("Base block unavailable."), { code: "capture_block_unavailable" });
     }
-    const used = await this.token.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
+    const used = await this.captureReadToken.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
     if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
     if (!Number.isSafeInteger(firstBlock) || firstBlock < 0 || latest.number < firstBlock) {
       throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
@@ -432,7 +443,7 @@ export class X402VerificationPaymentGate {
     const abi = new Interface(TOKEN_ABI);
     const events = [];
     for (let start = scanFrom; start <= scanEnd; start += 1_000) {
-      events.push(...await this.provider.getLogs({
+      events.push(...await this.captureProvider.getLogs({
         address: this.config.asset, fromBlock: start, toBlock: Math.min(scanEnd, start + 999),
         topics: [
           [abi.getEvent("AuthorizationUsed").topicHash, abi.getEvent("AuthorizationCanceled").topicHash],
@@ -446,7 +457,7 @@ export class X402VerificationPaymentGate {
       if (!parsed || parsed.args.authorizer.toLowerCase() !== proof.from.toLowerCase()
         || parsed.args.nonce.toLowerCase() !== proof.nonce.toLowerCase()) continue;
       if (parsed.name === "AuthorizationCanceled") return { status: "cancelled" };
-      const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+      const receipt = await this.captureProvider.getTransactionReceipt(event.transactionHash);
       if (!receipt || Number(receipt.status) !== 1) return { status: "pending" };
       const transfer = receipt.logs.some((log) => {
         if (log.address.toLowerCase() !== this.config.asset.toLowerCase()) return false;
@@ -512,7 +523,10 @@ export class X402VerificationPaymentGate {
             } }
           );
           this.logger.warn?.(
-            { reasonCode: "verify_payment_domain_unavailable", err: this.domainError },
+            { reasonCode: "verify_payment_domain_unavailable", err: this.domainError,
+              cause: { code: cause?.code, message: cause?.shortMessage ?? cause?.message ?? String(cause),
+                statusCode: cause?.response?.statusCode ?? cause?.statusCode,
+                responseStatus: cause?.info?.responseStatus } },
             "verification_payment_gate.domain_unavailable"
           );
           if (retryable) {
@@ -520,6 +534,10 @@ export class X402VerificationPaymentGate {
             // Attempts back off 1, 2, 4, ... 30 seconds and share in-flight reads.
             this.domainNextAttemptAt = Date.now() + this.domainRetryDelayMs;
             this.domainRetryTimer = setTimeout(() => {
+              // Node's timer clock can fire just before the wall-clock deadline.
+              // The timer already waited the backoff; never let it kill its own
+              // retry chain on the request-only deadline check.
+              this.domainNextAttemptAt = 0;
               void this.eip712Domain().catch(() => {});
             }, this.domainRetryDelayMs);
             this.domainRetryTimer.unref?.();

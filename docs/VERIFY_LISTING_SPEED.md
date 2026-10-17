@@ -60,23 +60,35 @@ behavior. The HTTP smoke suite runs this guard automatically.
 The configured Verify gate factory is asynchronous. Bootstrap awaits it,
 validating the chain ID, token name and reproduced EIP-712 domain separator
 before accepting requests. The existing domain promise cache is retained;
-no authorization, balance, nonce, capture or reconciliation logic changes.
+profile pricing, authorization checks and capture/reconciliation decisions
+are unchanged. Transport routing is described below.
 Startup validation uses an eight-second bound and always retains a correctly
 configured gate. A transport failure or timeout retries in the background
 with 1/2/4/8/16/30-second capped backoff. Requests inside the same
 `domainNextAttemptAt` window immediately reuse the 503 with a `Retry-After`
 header and make zero provider calls. The first request after the deadline
-can start the retry; concurrent attempts share one promise. Successful
+can start the retry; concurrent attempts share one promise. The background
+timer clears that request deadline before attempting, so Node firing it
+slightly early on its loop clock cannot stop the idle retry chain. Successful
 recovery stops retries and caches the domain again. Chain ID, token name and separator mismatches
 stay fail-closed until operator correction and restart. Paid admission
 retains its existing deadlines and in-flight captures retain their gate.
 
-The Base provider uses `staticNetwork`; the gate explicitly reads
-`eth_chainId` to validate the chain before caching the domain. Its
-`FetchRequest` has an eight-second transport timeout and one attempt,
-so ethers cannot add independent network-detection or HTTP 429 retry
-loops. Provider errors and gate state transitions use the structured
-logger and honour `LOG_LEVEL`.
+Both Base providers use `staticNetwork`; the gate explicitly reads
+`eth_chainId` to validate the chain before caching the domain. The fast
+domain/admission provider's `FetchRequest` has an eight-second timeout and
+one attempt, so ethers cannot add independent detection or throttle loops.
+The separate capture provider retains the prior transport defaults:
+300-second timeout and up to 12 attempts. It backs the Wallet/KmsSigner,
+capture contract, capture checkpoint, receipt polling, reconciliation
+nonce reads, blocks and log scans. Capture's existing `wait(1, 60s)` bound
+is unchanged. Tests use a throttled log scan taking over eight seconds.
+
+Provider errors and domain transitions use the structured logger and
+honour `LOG_LEVEL`. Domain warnings include the underlying error code,
+short message and HTTP response status when available (including 429),
+or the specific identity mismatch. These diagnostics are not added to
+the public 503 response.
 
 While the domain is unavailable, unpaid probes and x402 discovery return
 HTTP 503 `payment_domain_unavailable`, with `details.status: unavailable`
@@ -91,9 +103,13 @@ The real-server smoke fixture verifies boot outage, recovery and zero
 provider calls on subsequent probes/discovery; `--assert-recovery` runs
 that scenario in the internal measurement script. `--rpc-429` exercises
 rate limiting and `--assert-hung-recovery` holds the RPC connection open.
-Both variants assert recovery without restart within a maximum backoff
-window, cached 503s for request bursts, Retry-After and both available cards.
-A separate wire test bounds transport timeout independently of admission.
+Both variants test boot recovery without restart, cached 503s for request
+bursts, Retry-After and both available cards. A separate wire test bounds
+transport timeout independently of admission. During an in-flight hung
+domain attempt, requests share it and may wait up to eight seconds.
+Worst-case recovery is up to eight seconds in flight plus the next
+30-second backoff window (about 38 seconds); requests arriving inside an
+idle backoff window receive the cached 503 immediately.
 
 The root, OpenAPI and llms representations share one build promise per
 router/process, including concurrent first requests. JSON serialization,
