@@ -2,9 +2,12 @@
 
 Source packet: `claude/packets-2026-08-12`, `e8f1381b`,
 `docs/PACKET_VERIFY_TERMS_AND_PRIVACY.md`. One PR; Claude gates the code and
-Pascal approves the final text on the PR before merge. Both public pages use
-2026-10-17 as their text revision date; refresh both dates and the date assertion
-if approval/merge occurs on another date. Approval workflow language is confined
+Pascal approved the public wallet/transaction disclosure on 2026-10-17 and ships
+after Claude's gate passes. Both pages derive their date from the first-parent
+Git commit that publishes the legal text (UTC), so a later merge shows its actual
+date and unrelated rebuilds retain it. CI fetches full history; the Docker deploy
+build receives the same date resolved on the host. Coinbase CDP is excluded;
+that disclosure belongs to the future x402 poster-rail PR. Workflow language is confined
 to this review evidence and the PR, not the public pages or discovery copy.
 
 ## Credential boundary
@@ -30,7 +33,8 @@ in the real header and tests approved, rejected, unreachable, platform-fault,
 prober-failure and dispatch-failure outcomes. Target errors and responses echo the
 sentinel. Assertions inspect every state-store call (including transient writes),
 all map/array state, run GET JSON, receipt GET JSON and aliases, signed receipts,
-the event log, raw logger/console arguments and serialized logger output. Replays
+the event log, raw logger/console arguments, serialized logger output, and raw
+stdout/stderr writes. Replays
 must not dispatch again, a later authenticated run without its header must fail,
 and a subsequent unauthenticated run must receive no credential. The real
 `server.js` smoke test separately checks stdout/stderr at debug level on refused
@@ -39,10 +43,14 @@ requests and the terms redirect. No live payment or external target is used.
 No credential persistence leak was found in these paths. The integration test did
 find a receipt-signing defect: decisive deterministic verdicts may omit `reason`,
 but `buildVerifyReceipt` retained `reason: undefined`, rejected by the strict JWS
-canonicalizer. Compacting that optional verdict field makes those real decisive
-receipts signable; the serialized content identity is unchanged. Removing this
-fix turns the new tests red. Ten targeted mutations are recorded in
+canonicalizer. The fix is isolated in PR #1501 and must merge/deploy first.
+This terms PR is based on that fix and does not change the receipt builder.
+The original ten targeted mutations are recorded in
 [evidence/verify-terms-privacy/credential-mutations.json](evidence/verify-terms-privacy/credential-mutations.json).
+
+Six additional scope-handback mutations (raw stdout/stderr, independent public
+companion, hard-coded date, author date instead of merge date) are recorded in
+[evidence/verify-terms-privacy/scope-handback-mutations.json](evidence/verify-terms-privacy/scope-handback-mutations.json).
 
 ## Claims and their evidence
 
@@ -63,7 +71,7 @@ promise.
 | Captured payment is a confirmed on-chain USDC transfer (§3) | `X402VerificationPaymentGate.capture` calls `transferWithAuthorization` and waits for successful receipt; reconciliation requires matching transfer evidence. There is no application-level reversal. Chain permanence is an external chain property, not a guarantee established by an application test. |
 | Refund by new transfer; dispute within 30 days; review run/receipt/logs; refund own faults, not correctly applied profiles (§4) | Operator policy fixed by the packet and expressed in `marketing/src/pages/terms.astro`. No automatic refund/dispute API is claimed or added. The review artifacts are stored runs/receipts plus technical logs; raw target output and credentials are not retained for dispute review. |
 | Submission rights, no secrets/personal data in bodies, scoped revocable credential exception, revocation and no attacks (§5) | Customer obligations in the packet. `assertMcpEndpointCredentialBoundary`, schema validation and `assertEphemeralCredential` enforce the supported credential channel; the new sentinel tests prove its lifetime/persistence boundary. `createVerifyRoutes` calls the `verify_runs` rate limiter before payment or execution. |
-| Public run records include target/inputs/verdict/billing; public receipts by run id (§5–6 and privacy) | `VerificationRunService.getRun` / `publicRun` and unauthenticated GET in `verify-routes.js`; `badge-routes.js` resolves `/receipts/:runId` to the immutable receipt. The private payment proof is stored separately and is not in this projection. |
+| Public run records include target/inputs/verdict/billing, paying wallet address and payment transaction; public receipts by run id (§5–6 and privacy) | `VerificationRunService.getRun` / `publicRun` exposes `customer` and `billing.transactionHash`; `buildVerifyReceipt` includes `intent.poster` / `execution.provider`; unauthenticated GET in `verify-routes.js`; `badge-routes.js` resolves `/receipts/:runId` to the immutable receipt. The private payment proof is stored separately and is not in this projection. |
 | Receipt verification using public keys (§6) | `core/badge-receipt-signing.js` canonical bytes and signature verification; `badge-routes.js` JWKS endpoint; the sentinel checks cryptographically verify each signed receipt. |
 | Bounded automated evidence, no warranty/audit/certification/legal advice, as-is service (§7) | Profile success criteria and limits in `verification-profile-registry.js`; `buildVerifyReceipt` attestation and evidence hashes describe one run. The warranty disclaimers are operator policy. |
 | Run-price liability cap, exclusions and mandatory-law carve-outs (§8); changes published with date (§9); Swiss law, Zurich venue and consumer carve-out (§10) | Fixed operator policy from the packet in `marketing/src/pages/terms.astro`, not executable settlement rules or a claim of legal advice. Pascal's final approval is required. |

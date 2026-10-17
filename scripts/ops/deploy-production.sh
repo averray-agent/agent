@@ -955,9 +955,16 @@ build_site() {
     return
   fi
 
+  # The Node image need not include Git. Resolve the publishing merge date on
+  # the host and pass only that public build metadata into the site build.
+  local legal_revision_date
+  legal_revision_date=$(TZ=UTC git -C "$APP_ROOT" log --first-parent -1 \
+    --date=format-local:%Y-%m-%d --format=%cd -- \
+    marketing/src/pages/terms.astro marketing/src/pages/privacy.astro)
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e npm_config_cache=/tmp/.npm \
+    -e VERIFY_LEGAL_REVISION_DATE="$legal_revision_date" \
     -v "$APP_ROOT:/workspace" \
     -w /workspace \
     "$SITE_NODE_IMAGE" \

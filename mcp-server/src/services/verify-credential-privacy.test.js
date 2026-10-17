@@ -55,6 +55,14 @@ for (const scenario of ["approved", "rejected", "unreachable", "platform_fault",
     for (const level of ["debug", "info", "warn", "error", "log"]) {
       t.mock.method(console, level, (...args) => logCalls.push(material(args)));
     }
+    const rawWrites = [];
+    for (const stream of [process.stdout, process.stderr]) {
+      const write = stream.write;
+      t.mock.method(stream, "write", function (chunk, ...args) {
+        rawWrites.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+        return write.call(this, chunk, ...args);
+      });
+    }
     const seenCredentials = [];
     const runner = new McpFailureSemanticsRunner({ transportFactory: ({ credential }) => {
       seenCredentials.push(credential);
@@ -134,6 +142,7 @@ for (const scenario of ["approved", "rejected", "unreachable", "platform_fault",
       secretAbsent(await stateStore.listEventLog(), "event log");
       secretAbsent(logCalls, "every logger/console call");
       secretAbsent(logLines, "every serialized log line");
+      secretAbsent(rawWrites, "every raw stdout/stderr write");
       assert.equal(coordinator.inFlight.size, 0, "no live run retained after completion");
       return run;
     }
