@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { p256 } from "@noble/curves/nist.js";
+import { canonicalBadgeReceiptBytes, KmsBadgeReceiptSigner, verifyBadgeReceiptSignature } from "./badge-receipt-signing.js";
 import { VERIFY_PROFILE_PRICES } from "../services/verification-profile-registry.js";
 
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
@@ -429,4 +432,40 @@ test("MCP verify receipt names each bounded check and carries neither credential
   assert.doesNotMatch(JSON.stringify(receipt), new RegExp(secret, "u"));
   assert.doesNotMatch(JSON.stringify(receipt), /\b(?:certified|secure)\b/iu);
   assertWorkReceiptContentAddress(receipt);
+});
+
+// The deterministic handler intentionally supplies reasonCode/detail, not reason.
+// Hashing already omits undefined; signing must see exactly the stored JSON too.
+test("deterministic Verify verdict without reason signs with JSON-round-trip canonical bytes", async () => {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const der = publicKey.export({ type: "spki", format: "der" });
+  const keyId = "arn:aws:kms:eu-central-2:000000000000:key/11111111-2222-3333-4444-555555555555";
+  const signer = new KmsBadgeReceiptSigner({
+    region: "eu-central-2", keyId, kid: "receipt-test",
+    publicKeyPem: publicKey.export({ type: "spki", format: "pem" }),
+    publicKeyFingerprint: "sha256:" + createHash("sha256").update(der).digest("hex")
+  }, { kmsClient: { send: async (command) => {
+    if (command.constructor.name === "GetPublicKeyCommand") return { KeyId: keyId, PublicKey: der };
+    return { Signature: p256.sign(new Uint8Array(command.input.Message),
+      new Uint8Array(Buffer.from(privateKey.export({ format: "jwk" }).d, "base64url")),
+      { prehash: false, format: "der", lowS: false }) };
+  } } });
+  await signer.initialize();
+  for (const outcome of ["approved", "rejected"]) {
+    const profile = { name: "git-patch-tests-v1", version: 1, ref: "git-patch-tests-v1@1",
+      handler: "deterministic", handlerVersion: 1, limits: { timeoutMs: 120_000 },
+      price: VERIFY_PROFILE_PRICES["git-patch-tests-v1"] };
+    const receipt = buildVerifyReceipt({
+      profile,
+      run: { customer: live.poster, target: { repository: "github.com/example/project" }, inputs: {},
+        billing: { status: "captured", ...profile.price } },
+      execution: { artifactHash: ARTIFACT_HASH },
+      verdict: { outcome, reasonCode: outcome === "approved" ? "DETERMINISTIC_MATCH" : "DETERMINISTIC_MISMATCH" }
+    });
+    const signature = await signer.signDocument(receipt);
+    assert.equal(verifyBadgeReceiptSignature({ ...receipt, signature }, signer.getJwks().keys[0]), true);
+    const stored = JSON.parse(JSON.stringify(receipt));
+    assert.deepEqual(canonicalBadgeReceiptBytes(receipt), canonicalBadgeReceiptBytes(stored));
+    assert.equal(receipt.receiptId, hashWorkReceiptContent(stored));
+  }
 });

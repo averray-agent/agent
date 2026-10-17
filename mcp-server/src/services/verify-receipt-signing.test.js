@@ -100,6 +100,35 @@ test("X1b backfill counts dangling and non-Verify receipts as missing and contin
   assert.equal((await store.getWorkReceiptDocument("badge-doc")).signature, undefined);
 });
 
+test("finalizer tick signs an already-captured deterministic run without reason after restart", async () => {
+  const f = await signingFixture();
+  const store = new MemoryStateStore();
+  const profiles = new VerificationProfileRegistry();
+  const profile = profiles.get("mcp-failure-semantics-v1", 1);
+  const run = { runId: "captured-before-signing-fix", status: "executed",
+    profile: profile.name, profileVersion: 1, submittedAt: "2026-10-09T00:00:00Z",
+    customer: "0x" + "1".repeat(40), target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
+    execution: { status: "decidable" },
+    verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
+    billing: { ...profile.price, status: "captured", transactionHash: "0x" + "a".repeat(64) }
+  };
+  await store.reserveVerificationRun(run, { paymentId: "already-paid" });
+  let paymentCalls = 0, evaluations = 0;
+  const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, badgeReceiptSigner: f.signer,
+    paymentGate: new Proxy({}, { get: () => async () => { paymentCalls++; throw new Error("must not touch payment"); } }) });
+  service.evaluatePinnedProfile = async () => { evaluations++; throw new Error("must not re-evaluate"); };
+  const completed = await service.finalizeAvailableRuns();
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].status, "complete");
+  assert.deepEqual(completed[0].billing, run.billing);
+  assert.deepEqual(completed[0].verdict, run.verdict);
+  assert.equal(paymentCalls, 0);
+  assert.equal(evaluations, 0);
+  assert.equal(verifyBadgeReceiptSignature(await store.getWorkReceiptDocument(completed[0].receiptId), f.jwk), true);
+  assert.deepEqual(await service.finalizeAvailableRuns(), []);
+  assert.equal(f.signs(), 1);
+});
+
 for (const authorizationAvailable of [true, false]) {
   test(`X1b signing retry preserves captured billing and the decisive verdict without recapture (authorization ${authorizationAvailable ? "retained" : "missing"})`, async () => {
     const f = await signingFixture();
