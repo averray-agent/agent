@@ -1,0 +1,37 @@
+{
+  "measuredAt": "2026-10-17T10:22:18.550249+00:00",
+  "base": "9cda08420815cc256abaf0d85c108be3dc5c4f6a",
+  "method": "One mutation at a time, focused tests, source restored; syntax failures excluded.",
+  "results": [
+    {
+      "mutant": "coordinator-raw-stdout",
+      "file": "mcp-server/src/services/mcp-probe-coordinator.js",
+      "result": "RED"
+    },
+    {
+      "mutant": "prober-raw-stdout",
+      "file": "mcp-server/src/services/mcp-prober-service.js",
+      "result": "RED"
+    },
+    {
+      "mutant": "prober-raw-stderr",
+      "file": "mcp-server/src/services/mcp-prober-service.js",
+      "result": "RED"
+    },
+    {
+      "mutant": "public-companions-terms",
+      "file": "mcp-server/src/core/public-openapi-contract.js",
+      "result": "RED"
+    },
+    {
+      "mutant": "hardcoded-legal-date",
+      "file": "marketing/src/pages/terms.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "author-date-instead-of-merge",
+      "file": "marketing/src/lib/legal-revision-date.mjs",
+      "result": "RED"
+    }
+  ]
+}

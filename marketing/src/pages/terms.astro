@@ -1,0 +1,82 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+import { legalRevisionDate } from "../lib/legal-revision-date.mjs";
+const updated = legalRevisionDate();
+---
+
+<BaseLayout title="Averray Verify: terms of use" description="Terms for paid verification runs, payments, disputes, public results and liability." canonicalUrl="https://averray.com/terms/">
+  <main class="page">
+    <SiteNav current={null} />
+    <header class="page-hero">
+      <p class="eyebrow">Legal</p>
+      <h1 class="page-hero__title">Averray Verify: terms of use</h1>
+      <p class="page-hero__lede">Last updated {updated}.</p>
+    </header>
+    <section class="section legal" data-verify-terms>
+      <h2 class="section__title">1. Who we are</h2>
+      <p>Averray Verify is operated by Pascal Kuriger, sole proprietor, Hauptstrasse 51, 8162 Steinmaur, Switzerland ("we", "us"). Contact: pkuriger@averray.com. See the <a href="/imprint/">Imprint</a>.</p>
+      <h2 class="section__title">2. The service</h2>
+      <p>You send a verification request to <code>POST https://api.averray.com/verify/runs</code>. It names a published profile, a target, and inputs. We run that profile in our sandboxed runner and return a verdict:</p>
+      <ul class="checklist">
+        <li><code>approved</code>, <code>rejected</code> or <code>inconclusive</code>; platform faults are reported separately as <code>platform_fault</code> and are not charged;</li>
+        <li>with a signed receipt.</li>
+      </ul>
+      <p>The profiles, their limits and their prices are published at <a href="/pricing/">averray.com/pricing</a> and <code>https://api.averray.com/verify/profiles</code>.</p>
+      <h2 class="section__title">3. Price and payment</h2>
+      <ul class="checklist">
+        <li><strong>The quote is the price.</strong> You pay per run with x402 in USDC on Base. The price that applies is the one in the HTTP 402 quote for the profile you request, at the time you sign the authorization.</li>
+        <li><strong>When you are charged:</strong> only when the run returns <code>approved</code> or <code>rejected</code>. Inconclusive runs, and runs that fail because of a fault on our side, are not charged. An authorization that expires unused, or that you cancel before capture, is not charged either.</li>
+        <li><strong>Payments are final on chain.</strong> A captured payment is an on-chain USDC transfer and cannot be reversed by us or by anyone else. Refunds, where section 4 grants one, are paid as a new transfer to the paying address.</li>
+      </ul>
+      <h2 class="section__title">4. Disputing a charge or a verdict</h2>
+      <ul class="checklist">
+        <li><strong>How to dispute:</strong> if you believe a charged run was decided wrongly because of a fault in our service, email pkuriger@averray.com within <strong>30 days</strong> of the run. Include the run id.</li>
+        <li><strong>What we do:</strong> we review the run, its receipt and its logs.</li>
+        <li><strong>Our commitment:</strong> if the verdict was caused by a fault on our side, we refund the price of that run to the paying address.</li>
+        <li><strong>What this is not:</strong> disagreement with a correctly applied profile is not a fault.</li>
+      </ul>
+      <h2 class="section__title">5. What you send us</h2>
+      <ul class="checklist">
+        <li><strong>You must have the right to submit what you send,</strong> and to let us run it against the target you name.</li>
+        <li><strong>Don't send secrets, private keys, or other people's personal data in the request body or inputs.</strong> They are stored, and they are publicly readable (see section 6).</li>
+        <li><strong>One exception: a scoped, revocable test credential for your target.</strong> It may be sent only in the <code>verification-target-authorization</code> header, together with <code>target.auth</code>, and the profile uses it only for that run. Use a credential limited to the test and revoke it afterwards. The credential is not written to the run record or the logs.</li>
+        <li><strong>No attacks:</strong> don't use the service to attack the sandbox, our infrastructure, or any target you are not authorized to test. We may rate-limit or refuse requests.</li>
+      </ul>
+      <h2 class="section__title">6. Results are public</h2>
+      <ul class="checklist">
+        <li><strong>Run records and receipts can be read by anyone with the run id,</strong> without logging in. That includes the target and inputs you submitted, the verdict, the billing status, the paying wallet address and the payment transaction.</li>
+        <li><strong>Each receipt is signed.</strong> Anyone can check it against our published keys.</li>
+      </ul>
+      <h2 class="section__title">7. What a verdict is, and isn't</h2>
+      <p>A verdict is automated evidence that a named profile produced a named result on your inputs at a point in time. It is not:</p>
+      <ul class="checklist">
+        <li>a warranty;</li>
+        <li>a security audit;</li>
+        <li>a certification;</li>
+        <li>legal advice.</li>
+      </ul>
+      <p>The service is provided as it is.</p>
+      <h2 class="section__title">8. Liability</h2>
+      <ul class="checklist">
+        <li><strong>The cap:</strong> to the extent the law allows, our liability for any run is limited to the price you paid for that run.</li>
+        <li><strong>What we don't owe:</strong> indirect or consequential loss, such as lost profit, lost data or business interruption.</li>
+        <li><strong>What the cap doesn't cover:</strong> liability for intent or gross negligence, or any other liability that mandatory law does not allow us to exclude (Art. 100 Swiss Code of Obligations).</li>
+      </ul>
+      <h2 class="section__title">9. Changes</h2>
+      <ul class="checklist">
+        <li><strong>The quote decides the price.</strong> We may change prices, profiles and these terms. The 402 quote at the time you sign always decides the price of that run.</li>
+        <li><strong>Where changes appear:</strong> changes to these terms are published here, with a new date.</li>
+      </ul>
+      <h2 class="section__title">10. Law and venue</h2>
+      <ul class="checklist">
+        <li><strong>Law:</strong> Swiss law applies, excluding the UN Convention on Contracts for the International Sale of Goods.</li>
+        <li><strong>Venue:</strong> the courts of the city of Zurich, Switzerland.</li>
+        <li><strong>Consumers:</strong> mandatory consumer-protection rules of the country where you live are not affected.</li>
+      </ul>
+    </section>
+    <SiteFooter />
+  </main>
+</BaseLayout>

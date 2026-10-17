@@ -81,6 +81,7 @@ const withDefaultGetMethod = (entries) => entries.map((entry) => ({ method: "GET
 
 const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/robots.txt", description: "Crawler policy and public-site sitemap; admin paths excluded." },
+  { path: "/terms", description: "Redirect to the Averray Verify terms of use." },
   { path: "/pricing", description: "Verify prices projected from the published profile registry and a link to the pricing page." },
   { path: "/openapi.json", description: "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded." },
   { path: "/agent-tools.json", description: "Directory-safe discovery manifest." },
