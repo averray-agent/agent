@@ -27,6 +27,7 @@ test("legal date follows the publishing merge in UTC and survives later builds",
   date = "2030-03-04T23:30:00-02:00";
   git("merge", "--no-ff", "terms", "-m", "publish terms", "--no-gpg-sign");
   assert.equal(legalRevisionDate({ root, env: {} }), "2030-03-05");
+  assert.equal(legalRevisionDate({ root: join(root, "marketing"), env: {} }), "2030-03-05");
   date = "2030-06-01T12:00:00Z";
   writeFileSync(join(root, "unrelated.txt"), "later deploy");
   git("add", "."); git("commit", "-m", "unrelated", "--no-gpg-sign");
