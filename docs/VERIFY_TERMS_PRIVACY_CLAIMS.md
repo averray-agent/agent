@@ -89,12 +89,16 @@ promise.
 Changed: Astro terms/privacy/footer; shared site/API llms builder; API `/terms`
 302, root endpoint list, metric path label; discovery source and all three
 committed mirrors; OpenAPI and PUBLIC_COMPANIONS; marketing sync allow-list;
-deployment terms/privacy byte checks; built content guards; receipt serialization;
+deployment terms/privacy byte checks; built content/date guards; Git merge-date
+resolution and CI full-history checkout;
 credential integration and HTTP smoke tests. No generated site HTML is committed.
 
 Checked: marketing source llms file and generator; sitemap generator; existing
-pricing page; profile registry and payment price guards; public receipt route and
+pricing page; profile registry and payment price guards; receipt serialization
+(now isolated in #1501), public receipt route and
 signer; payment capture/reconciliation; state persistence/event log; prober/runner
 and HTTP logging; deployment Compose/env template. Existing SDK, MCP tools,
-workflow definitions and price fixtures need no new method or price changes.
-No environment, VPS secret, Caddy, indexer or contract change is required.
+price fixtures need no new method or price changes.
+No runtime environment, VPS secret, Caddy, indexer or contract change is required.
+The Docker site build receives only the public VERIFY_LEGAL_REVISION_DATE metadata
+resolved from the host checkout; no new operator configuration is required.
