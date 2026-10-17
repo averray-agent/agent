@@ -109,13 +109,17 @@ async function startServer(port, envOverrides = {}, execArgv = []) {
     // stderr is piped purely so a boot failure can say WHY. A bad env used to
     // surface as 51 identical "server exited before listening" lines with the
     // actual ConfigError discarded, which is a long way to walk to find a typo.
-    // stdout stays ignored — the health poll below is the readiness signal.
-    stdio: ["ignore", "ignore", "pipe", "ipc"],
+    // stdout is captured for credential-privacy assertions; health is readiness.
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     detached: false
   });
   liveChildren.add(child);
   child.once("exit", () => liveChildren.delete(child));
 
+  let stdout = "";
+  child.readStdout = () => stdout;
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => { stdout += chunk; });
   let stderr = "";
   child.readStderr = () => stderr;
   child.stderr?.setEncoding("utf8");
@@ -2987,3 +2991,36 @@ for (const mode of ["503", "429", "hung"]) {
     } finally { await rm(temporary, { recursive: true, force: true }); }
   });
 }
+
+
+test("http smoke: terms redirects publicly and credential headers never enter HTTP logs", SMOKE_TEST_OPTIONS, async () => {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, { LOG_LEVEL: "debug" });
+  const base = `http://127.0.0.1:${port}`;
+  const sentinel = "verify-http-log-SENTINEL-7e4c0-never-write";
+  try {
+    const terms = await fetch(`${base}/terms`, { redirect: "manual" });
+    assert.equal(terms.status, 302);
+    assert.equal(terms.headers.get("location"), "https://averray.com/terms/");
+    await terms.text();
+    // Real server.js success/error logging, with all levels enabled. Accepted
+    // runs, persistence and receipts are exercised in verify-credential-privacy.
+    for (const body of [{}, { profile: "unknown" }, {
+      profile: "mcp-failure-semantics-v1", profileVersion: 1, inputs: {},
+      target: { endpoint: "https://target.example.test/mcp", transport: "streamable_http",
+        auth: { scheme: "bearer", credentialRef: "run-only" } }
+    }]) {
+      const response = await fetch(`${base}/verify/runs`, { method: "POST",
+        headers: { "content-type": "application/json", "verification-target-authorization": `Bearer ${sentinel}` },
+        body: JSON.stringify(body) });
+      assert.ok(response.status >= 400);
+      assert.ok(!(await response.text()).includes(sentinel));
+    }
+  } finally {
+    await stop(child);
+  }
+  const logs = child.readStdout() + child.readStderr();
+  assert.match(logs, /http.response/u);
+  assert.match(logs, /http.error/u);
+  assert.ok(!logs.includes(sentinel), "no stdout/stderr log line may contain the scoped credential");
+});

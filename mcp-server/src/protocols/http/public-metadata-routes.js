@@ -25,6 +25,7 @@ const ROOT_ENDPOINTS = [
   "/openapi.json",
   "/robots.txt",
   "/pricing",
+  "/terms",
   "/.well-known/x402",
   "/verify/profiles",
   "/verify/runs",
@@ -258,6 +259,11 @@ export function createPublicMetadataRoutes({
 
     if (request.method === "GET" && pathname === "/robots.txt") {
       respondText(response, 200, "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/terms") {
+      respondText(response, 302, "", { location: "https://averray.com/terms/" });
       return true;
     }
 

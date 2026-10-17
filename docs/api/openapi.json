@@ -76,6 +76,31 @@
         }
       }
     },
+    "/terms": {
+      "get": {
+        "operationId": "getVerifyTerms",
+        "summary": "Read the Averray Verify terms of use",
+        "tags": [
+          "Discovery"
+        ],
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirect to the public terms page.",
+            "headers": {
+              "Location": {
+                "description": "Canonical terms page.",
+                "schema": {
+                  "type": "string",
+                  "format": "uri",
+                  "const": "https://averray.com/terms/"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/pricing": {
       "get": {
         "operationId": "getPricing",

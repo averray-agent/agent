@@ -28,6 +28,7 @@ const generatedNestedFiles = [
   "trust/index.html",
   "privacy/index.html",
   "pricing/index.html",
+  "terms/index.html",
   "imprint/index.html",
   "transparency/index.html",
   "receipts/index.html",

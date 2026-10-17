@@ -23,5 +23,11 @@ export function buildVerifySiteSignalsLlmsSection({ apiUrl = "https://api.averra
 - Per-profile Verify prices: ${apiUrl}/pricing
 - Pricing page: ${VERIFY_PRICING_PAGE}
 - Before authorizing a run, read the requested profile's live 402 quote. ${VERIFY_BILLING_RULE}
+
+## Terms
+
+- Averray Verify terms of use: https://averray.com/terms/
+- API terms redirect: ${apiUrl}/terms
+- Privacy policy, including Verify data: https://averray.com/privacy/
 `;
 }
