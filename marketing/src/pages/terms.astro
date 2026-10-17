@@ -3,7 +3,8 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
-const updated = "2026-10-17";
+import { legalRevisionDate } from "../lib/legal-revision-date.mjs";
+const updated = legalRevisionDate();
 ---
 
 <BaseLayout title="Averray Verify: terms of use" description="Terms for paid verification runs, payments, disputes, public results and liability." canonicalUrl="https://averray.com/terms/">
@@ -46,7 +47,7 @@ const updated = "2026-10-17";
       </ul>
       <h2 class="section__title">6. Results are public</h2>
       <ul class="checklist">
-        <li><strong>Run records and receipts can be read by anyone with the run id,</strong> without logging in. That includes the target and inputs you submitted, the verdict, and the billing status.</li>
+        <li><strong>Run records and receipts can be read by anyone with the run id,</strong> without logging in. That includes the target and inputs you submitted, the verdict, the billing status, the paying wallet address and the payment transaction.</li>
         <li><strong>Each receipt is signed.</strong> Anyone can check it against our published keys.</li>
       </ul>
       <h2 class="section__title">7. What a verdict is, and isn't</h2>

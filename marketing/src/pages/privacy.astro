@@ -4,7 +4,8 @@ import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
 
-const updated = "2026-10-17";
+import { legalRevisionDate } from "../lib/legal-revision-date.mjs";
+const updated = legalRevisionDate();
 ---
 
 <BaseLayout
@@ -97,7 +98,7 @@ const updated = "2026-10-17";
           <li>Your target (for example an MCP endpoint URL or a repository reference) and your inputs (for example a patch or a structured output).</li>
           <li>The verdict, the execution summary and the signed receipt.</li>
         </ul>
-        <p><strong>Run records and receipts are publicly readable by run id.</strong> Don't put personal data in them.</p>
+        <p><strong>Run records and receipts are publicly readable by run id.</strong> This includes the paying wallet address and the payment transaction. Don't put personal data in them.</p>
         <h3>A scoped test credential</h3>
         <p>If you send one in the <code>verification-target-authorization</code> header, it is used only to run your target for that run. It is not stored in the run record or the logs; it is kept in memory for the run only.</p>
         <h3>Legal basis</h3>

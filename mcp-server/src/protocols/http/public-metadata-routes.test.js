@@ -568,5 +568,5 @@ test("terms: PUBLIC_COMPANIONS still requires the operation if discovery omits i
   delete document.paths["/terms"];
   const manifest = buildDiscoveryManifest();
   manifest.publicEndpoints = manifest.publicEndpoints.filter(({ path }) => path !== "/terms");
-  assert.ok(publicOpenApiErrors(document, { manifest }).some((error) => error.includes("/terms")));
+  assert.ok(publicOpenApiErrors(document, { manifest, inventory: [] }).some((error) => error.includes("/terms")));
 });

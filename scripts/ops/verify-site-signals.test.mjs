@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { VerificationProfileRegistry } from "../../mcp-server/src/services/verification-profile-registry.js";
 
+const fixtureMergeDate = "2031-02-03";
 const root = new URL("../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 let output;
@@ -17,7 +18,7 @@ before(async () => {
   // Isolate output from the other ops tests that also build marketing/dist.
   await promisify(execFile)("npm", ["--workspace", "marketing", "run", "build", "--", "--outDir", output], {
     cwd: fileURLToPath(root), timeout: 120_000, maxBuffer: 2_000_000,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" }
+    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1", VERIFY_LEGAL_REVISION_DATE: fixtureMergeDate }
   });
 });
 after(async () => { if (output) await rm(output, { recursive: true, force: true }); });
@@ -84,7 +85,11 @@ test("legal pages: final public wording, truthful Verify boundaries and fixed op
   for (const [page, document] of [["terms", terms], ["privacy", privacy]]) {
     assert.equal(document.querySelector('link[rel="canonical"]').href, `https://averray.com/${page}/`);
     assert.doesNotMatch(document.documentElement.outerHTML, /\b(?:draft|not approved|proposed|pending)\b|\[Confirm:|\[date/iu);
-    assert.match(plain(document.querySelector("header")), /Last updated 2026-10-17\./u);
+    assert.ok(plain(document.querySelector("header")).includes(`Last updated ${fixtureMergeDate}.`));
+  }
+  for (const document of [terms, privacy]) {
+    assert.ok(plain(document.body).includes("the paying wallet address and the payment transaction"));
+    assert.doesNotMatch(plain(document.body), /Coinbase CDP/iu);
   }
   assert.equal(terms.querySelectorAll("[data-verify-terms] h2").length, 10);
   const termsText = plain(terms.querySelector("[data-verify-terms]"));
@@ -102,7 +107,7 @@ test("legal pages: final public wording, truthful Verify boundaries and fixed op
     "verification-target-authorization header, together with target.auth", "only for that run",
     "not written to the run record or the logs", "revoke it afterwards", "rate-limit or refuse requests",
     "Run records and receipts can be read by anyone with the run id", "without logging in",
-    "target and inputs you submitted, the verdict, and the billing status", "published keys",
+    "target and inputs you submitted, the verdict, the billing status, the paying wallet address and the payment transaction", "published keys",
     "a warranty", "a security audit", "a certification", "legal advice", "provided as it is",
     "limited to the price you paid for that run", "indirect or consequential loss", "intent or gross negligence",
     "Art. 100 Swiss Code of Obligations", "402 quote at the time you sign always decides the price",
