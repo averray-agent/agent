@@ -722,6 +722,12 @@ async function fetchGithubPullRequestSnapshot({
     const body = typeof pr?.body === "string" ? pr.body : "";
     const htmlUrl = typeof pr?.html_url === "string" ? pr.html_url : "";
     const prText = `${title}\n${body}\n${htmlUrl}`.toLowerCase();
+    const state = typeof pr?.state === "string" ? pr.state : "unknown";
+    const merged = Boolean(pr?.merged || pr?.merged_at);
+    const closedAt = typeof pr?.closed_at === "string" ? pr.closed_at : null;
+    const closedBy = state === "closed" && !merged
+      ? await readPullRequestClosedBy({ fetchImpl, url: `${baseUrl}/repos/${repoPath}/issues/${parsedPr.pullNumber}`, headers })
+      : null;
     const [statusResult, checkRunsResult, reviewsResult] = headSha
       ? await Promise.allSettled([
           fetchGithubJson(fetchImpl, `${baseUrl}/repos/${repoPath}/commits/${headSha}/status`, { headers }),
@@ -743,8 +749,10 @@ async function fetchGithubPullRequestSnapshot({
       pullNumber: parsedPr.pullNumber,
       author: typeof pr?.user?.login === "string" ? { login: pr.user.login } : null,
       title,
-      state: typeof pr?.state === "string" ? pr.state : "unknown",
-      merged: Boolean(pr?.merged || pr?.merged_at),
+      state,
+      merged,
+      closedAt,
+      ...(closedBy ? { closedBy } : {}),
       headSha: headSha || null,
       ...(baseRepo ? { baseRepo } : {}),
       issueReferenced: referencesIssue({
@@ -782,6 +790,16 @@ async function fetchGithubPullRequestSnapshot({
       status: "unavailable",
       reason: error?.message ?? "github_lookup_failed"
     };
+  }
+}
+
+async function readPullRequestClosedBy({ fetchImpl, url, headers }) {
+  try {
+    const issue = await fetchGithubJson(fetchImpl, url, { headers });
+    const login = issue?.closed_by?.login;
+    return typeof login === "string" && login.trim() ? { login } : null;
+  } catch {
+    return null;
   }
 }
 

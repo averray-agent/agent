@@ -184,6 +184,7 @@ export const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/deposit-pool/subsidies", capabilities: ["ops:view"] },
   { method: "POST", path: "/admin/deposit-pool/subsidies", capabilities: ["admin:yield-subsidy:attest"] },
   { method: "GET", path: "/admin/github/status", capabilities: ["ops:view"] },
+  { method: "POST", path: "/admin/maintainer-repos/:repoId/cooldown/clear", capabilities: ["jobs:lifecycle"] },
   { method: "GET", path: "/admin/platform-fault-remediations", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/usdc-liquidity/status", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/xcm/finalize-exhausted", capabilities: ["ops:view"] },

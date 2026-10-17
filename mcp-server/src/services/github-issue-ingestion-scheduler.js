@@ -11,6 +11,15 @@ import {
   parseRepoList
 } from "../core/maintainer-surface-policy.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
+import { positiveGithubRepoId } from "../core/maintainer-repo-claim-cap.js";
+import {
+  getMaintainerRepoCooldown,
+  incrementMaintainerRepoCooldownCounter,
+  loadMaintainerRepoCooldownConfig,
+  normalizeMaintainerRepoCooldownConfig,
+  readCooldownDecision,
+  recordMaintainerStopSignal
+} from "../core/maintainer-repo-cooldown.js";
 
 export class GithubIssueIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -29,7 +38,8 @@ export class GithubIssueIngestionScheduler {
     retirementBatchSize = 10,
     retirementReadTimeoutMs = 3000,
     fetchImpl = fetch,
-    logger = console
+    logger = console,
+    repoCooldown = undefined
   } = {}) {
     this.platformService = platformService;
     this.eventBus = eventBus;
@@ -51,6 +61,9 @@ export class GithubIssueIngestionScheduler {
     this.upstreamReadSequence = 0;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
+    this.repoCooldown = normalizeMaintainerRepoCooldownConfig(
+      repoCooldown ?? loadMaintainerRepoCooldownConfig(process.env)
+    );
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
@@ -162,6 +175,7 @@ export class GithubIssueIngestionScheduler {
           skipped: []
         };
         querySummary.skipped.push(...(result.skippedDetails ?? []));
+        await this.recordIngestStopSignals(result.skippedDetails ?? [], now);
         for (const job of result.jobs) {
           if (remaining <= 0) break;
           const sourceKey = githubIssueKey(job);
@@ -177,6 +191,20 @@ export class GithubIssueIngestionScheduler {
             } catch {
               // Missing jobs are expected and created below.
             }
+          }
+          let cooldownSkip = null;
+          try {
+            cooldownSkip = await this.maintainerRepoCooldownSkip(job, now);
+          } catch {
+            this.logger?.warn?.({
+              event: "maintainer_repo_cooldown_counter_persist_failed",
+              surface: "ingest",
+              repoId: positiveGithubRepoId(job?.source?.githubRepoId)
+            }, "maintainer_repo_cooldown_counter_persist_failed");
+          }
+          if (cooldownSkip) {
+            querySummary.skipped.push(cooldownSkip);
+            if (cooldownSkip.enforced) continue;
           }
           try {
             await upsertScheduledIngestedJob(this.platformService, job, { dryRun: this.dryRun, now });
@@ -211,6 +239,84 @@ export class GithubIssueIngestionScheduler {
     }
 
     return this.finishWithRetirement(summary, now);
+  }
+
+  async recordIngestStopSignals(skippedDetails, now) {
+    for (const detail of skippedDetails) {
+      await this.recordOneIngestStopSignal(detail, now);
+    }
+  }
+
+  async recordOneIngestStopSignal(detail, now) {
+    if (detail?.reason !== "maintainer_stop_signal" || detail.escalates !== true) return;
+    const stateStore = this.platformService?.stateStore;
+    const repoId = positiveGithubRepoId(detail.repoId);
+    const sources = Array.isArray(detail.stopSources) ? detail.stopSources : [];
+    if (!repoId || sources.length === 0) {
+      try {
+        await incrementMaintainerRepoCooldownCounter(stateStore, "ambiguous", this.logger, {
+          event: "maintainer_repo_cooldown_ambiguous",
+          surface: "ingest",
+          reason: "repo_unattributed"
+        });
+      } catch {
+        this.logger?.warn?.({
+          event: "maintainer_repo_cooldown_counter_persist_failed",
+          surface: "ingest",
+          reason: "repo_unattributed"
+        }, "maintainer_repo_cooldown_counter_persist_failed");
+      }
+      return;
+    }
+    for (const source of sources) {
+      try {
+        await recordMaintainerStopSignal({
+          stateStore,
+          repoId,
+          fullName: detail.repo,
+          source,
+          now,
+          logger: this.logger
+        });
+      } catch {
+        this.logger?.warn?.({
+          event: "maintainer_repo_cooldown_observe_failed",
+          repoId,
+          code: "maintainer_repo_cooldown_observe_failed"
+        }, "maintainer_repo_cooldown_observe_failed");
+      }
+    }
+  }
+
+  async maintainerRepoCooldownSkip(job, now) {
+    const repoId = positiveGithubRepoId(job?.source?.githubRepoId);
+    const stateStore = this.platformService?.stateStore;
+    if (!repoId || typeof stateStore?.getServiceState !== "function") return null;
+    let record;
+    try {
+      record = await getMaintainerRepoCooldown(stateStore, repoId);
+    } catch {
+      return null;
+    }
+    const decision = readCooldownDecision(record, now);
+    if (!decision.active) return null;
+    const entry = {
+      id: job.id,
+      repoId,
+      reason: "maintainer_repo_cooldown",
+      cooldownUntil: decision.cooldownUntil
+    };
+    if (this.repoCooldown.mode !== "enforce") {
+      await incrementMaintainerRepoCooldownCounter(stateStore, "wouldRefuse", this.logger, {
+        event: "maintainer_repo_cooldown_would_refuse",
+        surface: "ingest",
+        repoId,
+        cooldownUntil: decision.cooldownUntil,
+        reason: decision.reason
+      });
+      return { ...entry, wouldSkip: true, enforced: false };
+    }
+    return { ...entry, enforced: true };
   }
 
   async finishWithRetirement(summary, now) {

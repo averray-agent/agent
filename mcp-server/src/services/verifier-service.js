@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { POSTER_REVIEW_HANDLER } from "../core/receipt-verifier-handlers.js";
 import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
+import { observeMaintainerPullRequest } from "../core/maintainer-repo-cooldown.js";
 import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { withPinnedRepositoryIdentity } from "./github-repository-identity-backfill.js";
@@ -128,6 +129,26 @@ export class VerifierService {
       validatedVerificationInput,
       verificationClaimantContext(session)
     );
+    // Preview stays read-only. A maintainer close is the GitHub observation
+    // (closed and not merged), never our own rejection of a pull request that
+    // is still open.
+    try {
+      await observeMaintainerPullRequest({
+        stateStore: this.stateStore,
+        lookup: verdict?.githubLookup,
+        job,
+        sessionStatus: session.status,
+        claimedAt: session.claimedAt,
+        submittedAt: session.submittedAt,
+        logger: this.logger
+      });
+    } catch {
+      this.logger?.warn?.({
+        event: "maintainer_repo_cooldown_observe_failed",
+        sessionId,
+        code: "maintainer_repo_cooldown_observe_failed"
+      }, "maintainer_repo_cooldown_observe_failed");
+    }
     if (guarded && verdict.outcome !== expectOutcome) {
       throw new ConflictError("The freshly evaluated verdict does not match the expected outcome.",
         "verdict_outcome_mismatch", { expected: expectOutcome, actual: verdict.outcome });

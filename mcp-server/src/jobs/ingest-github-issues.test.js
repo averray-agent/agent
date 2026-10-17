@@ -174,6 +174,9 @@ test("ingestGithubIssues stores one resolved GitHub repository id for a renamed-
           }
         };
       }
+      if (String(url).includes("/comments")) {
+        return { ok: true, async json() { return []; } };
+      }
       assert.equal(String(url), "https://api.github.com/repos/example/project");
       return {
         ok: true,

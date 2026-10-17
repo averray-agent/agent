@@ -6,8 +6,10 @@ import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   evaluateMaintainerSurfaceForIssue,
   normalizeRepo,
-  repoFromIssue
+  repoFromIssue,
+  scanPolicyText
 } from "../core/maintainer-surface-policy.js";
+import { isMaintainerAssociation } from "../core/maintainer-repo-cooldown.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 
 /**
@@ -23,6 +25,7 @@ import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 export const DEFAULT_QUERY =
   'is:issue is:open archived:false label:"good first issue" (test OR docs OR typo OR validation OR error OR refactor)';
 export const DEFAULT_BASE_URL = "http://localhost:8787";
+export const MAINTAINER_STOP_COMMENT_LIMIT = 20;
 
 const POSITIVE_LABEL_SCORES = new Map([
   ["good first issue", 30],
@@ -81,21 +84,40 @@ export async function ingestGithubIssues({
     fetchImpl
   });
   const scored = await Promise.all(issues.map(async (issue) => {
-    const policy = await evaluateMaintainerSurfaceForIssue(issue, {
+    const withComments = await withStopComments(issue, { githubToken, fetchImpl });
+    let policy = await evaluateMaintainerSurfaceForIssue(withComments, {
       githubToken,
       fetchImpl,
       ...maintainerPolicy
     });
-    return { issue, score: scoreIssue(issue), policy };
+    if (policy.allowed && maintainerCommentSources(withComments).length > 0) {
+      policy = { ...policy, allowed: false, reason: "maintainer_stop_signal" };
+    }
+    return { issue: withComments, score: scoreIssue(withComments), policy };
   }));
-  const skippedDetails = scored
-    .filter(({ score, policy }) => score < minScore || !policy.allowed)
-    .map(({ issue, score, policy }) => ({
-      repo: policy.repo ?? repoFromIssue(issue),
+  const skippedRows = scored.filter(({ score, policy }) => score < minScore || !policy.allowed);
+  const stopIssues = skippedRows
+    .filter(({ policy }) => policy.reason === "maintainer_stop_signal")
+    .map(({ issue }) => issue);
+  const stopRepoIds = stopIssues.length
+    ? await resolveIngestedRepoIds(stopIssues, { githubToken, fetchImpl })
+    : new Map();
+  const skippedDetails = skippedRows.map(({ issue, score, policy }) => {
+    const repo = policy.repo ?? repoFromIssue(issue);
+    const detail = {
+      repo,
       issueNumber: Number(issue.number),
       reason: policy.allowed ? "score_below_minimum" : policy.reason,
       score
-    }));
+    };
+    if (detail.reason === "maintainer_stop_signal") {
+      detail.repoId = stopRepoIds.get(normalizeRepo(repo)) ?? null;
+      const stopSources = maintainerStopSources(issue, policy);
+      detail.stopSources = stopSources;
+      detail.escalates = stopSources.length > 0;
+    }
+    return detail;
+  });
   const candidates = scored
     .filter(({ score, policy }) => score >= minScore && policy.allowed)
     .sort((left, right) => right.score - left.score)
@@ -320,6 +342,59 @@ async function lookupGithubRepositoryId(repo, { githubToken, fetchImpl }) {
   } catch {
     return null;
   }
+}
+
+export function maintainerStopSources(issue, policy) {
+  const sources = [];
+  for (const match of policy?.policyScan?.matches ?? []) {
+    if (match?.reason === "maintainer_stop_signal" && typeof match.path === "string" && match.path.trim()) {
+      sources.push(`policy:${match.path.trim()}`);
+    }
+  }
+  if (policy?.issueBodyHit === true && policy?.reason === "maintainer_stop_signal"
+    && isMaintainerAssociation(issue?.author_association)) {
+    const issueNumber = Number(issue?.number);
+    if (Number.isInteger(issueNumber) && issueNumber > 0) sources.push(`issue:${issueNumber}`);
+  }
+  sources.push(...maintainerCommentSources(issue));
+  return [...new Set(sources)];
+}
+
+async function withStopComments(issue, { githubToken, fetchImpl }) {
+  if (Array.isArray(issue?.comments)) return issue;
+  const repo = repoFullName(issue);
+  const number = Number(issue?.number);
+  const [owner, name] = String(repo).split("/");
+  if (!owner || !name || !Number.isInteger(number) || number <= 0) return issue;
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "agent-platform-issue-ingestor"
+  };
+  if (githubToken) headers.authorization = `Bearer ${githubToken}`;
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}`,
+      { headers }
+    );
+    if (!response?.ok || typeof response.json !== "function") return issue;
+    const body = await response.json();
+    if (!Array.isArray(body)) return issue;
+    return { ...issue, comments: body.slice(0, MAINTAINER_STOP_COMMENT_LIMIT) };
+  } catch {
+    return issue;
+  }
+}
+
+function maintainerCommentSources(issue) {
+  if (!Array.isArray(issue?.comments)) return [];
+  const sources = [];
+  for (const comment of issue.comments) {
+    if (!isMaintainerAssociation(comment?.author_association)) continue;
+    if (scanPolicyText(comment?.body).reason !== "maintainer_stop_signal") continue;
+    const commentId = Number(comment?.id);
+    if (Number.isInteger(commentId) && commentId > 0) sources.push(`comment:${commentId}`);
+  }
+  return sources;
 }
 
 function positiveRepoId(value) {
