@@ -286,6 +286,7 @@ export function createPlatformService() {
     selfIdentityRegistry
   });
   platformService.setWorkerProgressionService(workerProgressionService);
+  platformService.selfIdentityRegistry = selfIdentityRegistry;
   platformService.verifierClassRewards = loadVerifierClassRewards();
   platformService.setCatalogueLaneDiscipline(createCatalogueLaneDiscipline({
     stateStore,
@@ -770,6 +771,7 @@ export async function createPlatformRuntime() {
     })
   );
   platformService.setWorkerProgressionService(workerProgressionService);
+  platformService.selfIdentityRegistry = selfIdentityRegistry;
   platformService.logger = logger;
   const catalogueHydration = await platformService.hydrateCatalogue();
   logger.info?.(catalogueHydration, "catalogue.mutations_hydrated");

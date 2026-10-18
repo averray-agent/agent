@@ -747,7 +747,9 @@ async function fetchGithubPullRequestSnapshot({
       htmlUrl,
       repo: parsedPr.repo,
       pullNumber: parsedPr.pullNumber,
-      author: typeof pr?.user?.login === "string" ? { login: pr.user.login } : null,
+      author: readGithubActor(pr?.user),
+      ...(readGithubActor(pr?.merged_by) ? { mergedBy: readGithubActor(pr.merged_by) } : {}),
+      ...(readGithubActor(pr?.base?.repo?.owner) ? { repoOwner: readGithubActor(pr.base.repo.owner) } : {}),
       title,
       state,
       merged,
@@ -1020,6 +1022,14 @@ function decideRepositoryMatch({ job, parsedPr, expectedRepo, sourceRepo, github
       : (sourceRepo?.reason ?? "source_repo_id_unavailable"),
     sourceRepoRenamed: null
   };
+}
+
+function readGithubActor(user) {
+  if (!user || typeof user !== "object") return null;
+  const id = positiveRepoId(user.id);
+  const login = typeof user.login === "string" && user.login.trim() ? user.login : null;
+  if (id == null && !login) return null;
+  return { ...(id != null ? { id } : {}), ...(login ? { login } : {}) };
 }
 
 function readGithubRepository(repo) {

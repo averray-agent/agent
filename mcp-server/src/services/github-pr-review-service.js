@@ -9,16 +9,26 @@ import {
   normalizeMaintainerRepoCooldownConfig,
   observeMaintainerPullRequest
 } from "../core/maintainer-repo-cooldown.js";
+import {
+  decideGithubPrSelfMerge,
+  GITHUB_PR_SELF_MERGE_REASON,
+  incrementGithubPrSelfMergeCounter,
+  loadGithubPersonLinks,
+  loadGithubPrSelfMergeConfig
+} from "../core/github-claim-guardrails.js";
 
 export class GithubPrReviewService {
   constructor({ stateStore, verifierService, githubToken = process.env.GITHUB_TOKEN,
     slaHours = positive(process.env.GITHUB_PR_REVIEW_SLA_HOURS, 48),
     intervalMs = positive(process.env.GITHUB_PR_REVIEW_POLL_MINUTES, 30) * 60_000, logger = console,
-    repoCooldown = undefined }) {
+    repoCooldown = undefined, selfMerge = undefined }) {
     Object.assign(this, { stateStore, verifierService, slaHours, intervalMs, logger });
     this.repoCooldown = normalizeMaintainerRepoCooldownConfig(
       repoCooldown ?? loadMaintainerRepoCooldownConfig(process.env)
     );
+    this.selfMerge = selfMerge?.mode === "enforce" || selfMerge?.mode === "log"
+      ? { mode: selfMerge.mode }
+      : loadGithubPrSelfMergeConfig(process.env);
     this.enabled = Boolean(githubToken?.trim());
     this.githubUpstream = { ok: false, lastSuccessAt: null,
       lastError: this.enabled ? "github_not_checked" : "github_token_unconfigured" };
@@ -109,6 +119,18 @@ export class GithubPrReviewService {
 
   async reviewQueue(now, summary) {
     if (!this.enabled) return summary;
+    let personLinks = new Map();
+    let linksMeasured = false;
+    try {
+      const loaded = await loadGithubPersonLinks(this.stateStore);
+      personLinks = loaded.links;
+      linksMeasured = loaded.measured === true;
+    } catch {
+      this.logger?.warn?.({
+        event: "github_person_links_unmeasured",
+        code: "github_person_links_unmeasured"
+      }, "github_person_links_unmeasured");
+    }
     const queue = await this.pending({ now });
     const githubItems = queue.items.filter((entry) => entry.verifierMode === "github_pr");
     const failedRead = githubItems.find((item) => !completeGithubRead(item.upstream));
@@ -166,6 +188,29 @@ export class GithubPrReviewService {
           && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
           // Pascal's Option 1: only merged + approved may auto-settle.
           // Open green PRs and every other outcome stay with the operator.
+          const decision = decideGithubPrSelfMerge({
+            lookup: upstream, wallet: item.wallet, links: personLinks, linksMeasured
+          });
+          if (decision.action === "hold" && this.selfMerge.mode === "enforce") {
+            const held = {
+              ...observation,
+              holdReason: GITHUB_PR_SELF_MERGE_REASON,
+              selfMergeNote: "hold"
+            };
+            await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, held);
+            if (previous?.selfMergeNote !== "hold") await this.noteSelfMerge("held", item, decision);
+            summary.skipped.push({ sessionId: item.sessionId, reason: GITHUB_PR_SELF_MERGE_REASON });
+            continue;
+          }
+          if (decision.action === "hold" && previous?.selfMergeNote !== "hold") {
+            await this.noteSelfMerge("wouldHold", item, decision);
+            observation = { ...observation, selfMergeNote: "hold", selfMergeWouldHold: true };
+            await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
+          } else if (decision.action === "ambiguous" && previous?.selfMergeNote !== "ambiguous") {
+            await this.noteSelfMerge("ambiguous", item);
+            observation = { ...observation, selfMergeNote: "ambiguous" };
+            await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
+          }
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });
           const session = await this.stateStore.getSession(item.sessionId);
           if (verdict.outcome === "approved" || (session && session.status !== "submitted")) {
@@ -187,6 +232,27 @@ export class GithubPrReviewService {
       }
     }
     return summary;
+  }
+
+  async noteSelfMerge(field, item, decision = {}) {
+    try {
+      await incrementGithubPrSelfMergeCounter(this.stateStore, field);
+    } catch {
+      this.logger?.warn?.({
+        event: "github_pr_self_merge_counter_persist_failed",
+        code: "github_pr_self_merge_counter_persist_failed",
+        sessionId: item.sessionId
+      }, "github_pr_self_merge_counter_persist_failed");
+      return;
+    }
+    if (field === "ambiguous") return;
+    const event = field === "wouldHold" ? "github_pr_self_merge_would_hold" : "github_pr_self_merge_hold";
+    this.logger?.info?.({
+      event,
+      sessionId: item.sessionId,
+      basis: decision.basis ?? null,
+      mode: this.selfMerge.mode
+    }, event);
   }
 
   async observeMaintainerCooldown(item, upstream, now) {

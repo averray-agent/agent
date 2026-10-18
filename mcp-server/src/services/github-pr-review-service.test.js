@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GithubPrReviewService } from "./github-pr-review-service.js";
+import { githubReviewDisposition } from "../core/github-review-disposition.js";
+import { readGithubPrSelfMergeStatus } from "../core/github-claim-guardrails.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { VerifierService } from "./verifier-service.js";
@@ -560,4 +562,134 @@ test("admin run authenticates as admin and persists the same handler verdict as 
     outcomes.push(f.writes[0].outcome);
   }
   assert.deepEqual(outcomes, ["approved", "approved"]);
+});
+
+const selfMergeLookup = (extra = {}) => ({
+  status: "verified", merged: true, state: "closed", headSha: "merged-head", partial: {},
+  ...extra
+});
+
+function selfMergeReview(store, lookup, { mode = "enforce", verify } = {}) {
+  const calls = [];
+  const review = new GithubPrReviewService({
+    stateStore: store,
+    githubToken: "token",
+    logger: { info() {}, warn() {} },
+    selfMerge: { mode },
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: lookup }),
+      verifySubmission: verify ?? (async () => { calls.push("verify"); return { outcome: "approved" }; }),
+      slashJobStake: async () => { calls.push("slash"); },
+      resolveSinglePayout: async () => { calls.push("payout"); }
+    }
+  });
+  return { review, calls };
+}
+
+test("a merger who is the pull author is held for human review and never auto-slashed", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const lookup = selfMergeLookup({
+    author: { id: 42, login: "author-now" },
+    mergedBy: { id: 42, login: "author-before" },
+    repoOwner: { id: 9, login: "someone-else" }
+  });
+  const { review, calls } = selfMergeReview(store, lookup);
+  const run = await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.deepEqual(run.reviewed, []);
+  assert.ok(run.skipped.some((row) => row.sessionId === "pr" && row.reason === "github_pr_self_merge_review"));
+  const observation = await store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(observation.holdReason, "github_pr_self_merge_review");
+  assert.equal(githubReviewDisposition(observation), "human_review");
+  assert.equal((await store.getSession("pr")).status, "submitted");
+  assert.equal((await readGithubPrSelfMergeStatus(store)).held, 1);
+  await review.runOnce(new Date("2026-10-08T12:30:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.equal((await readGithubPrSelfMergeStatus(store)).held, 1);
+});
+
+test("log mode records the self-merge hold and still settles", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const lookup = selfMergeLookup({
+    author: { id: 42, login: "author-now" },
+    mergedBy: { id: 42, login: "author-before" }
+  });
+  const calls = [];
+  const { review } = selfMergeReview(store, lookup, {
+    mode: "log",
+    verify: async () => {
+      calls.push("verify");
+      const session = await store.getSession("pr");
+      await store.upsertSession({ ...session, status: "resolved" });
+      return { outcome: "approved" };
+    }
+  });
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(calls, ["verify"]);
+  assert.equal((await store.getSession("pr")).status, "resolved");
+  const observation = await store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(observation.holdReason, undefined);
+  const status = await readGithubPrSelfMergeStatus(store);
+  assert.equal(status.wouldHold, 1);
+  assert.equal(status.held, 0);
+});
+
+test("an unrelated maintainer merge still auto-settles, and a matching login is not a self-merge", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const unrelated = selfMergeLookup({
+    author: { id: 1, login: "worker" },
+    mergedBy: { id: 2, login: "maintainer" },
+    repoOwner: { id: 3, login: "owner" }
+  });
+  const first = selfMergeReview(store, unrelated);
+  await first.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(first.calls, ["verify"]);
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr"))?.holdReason, undefined);
+
+  const named = new MemoryStateStore();
+  await add(named, "pr");
+  const session = await named.getSession("pr");
+  await named.upsertSession({ ...session, submission: { ...session.submission, author: "same-person" } });
+  const footer = selfMergeReview(named, selfMergeLookup({
+    author: { login: "same-person" },
+    mergedBy: { login: "same-person" }
+  }));
+  await footer.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(footer.calls, ["verify"]);
+  assert.equal((await readGithubPrSelfMergeStatus(named)).held, 0);
+  assert.equal((await readGithubPrSelfMergeStatus(named)).ambiguous, 1);
+});
+
+test("a repo owner already linked to the claimant wallet holds the payout", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "prior", "github_pr", "resolved");
+  await store.upsertMutationReceipt("github_pr_author", "prior", {
+    githubLookup: {
+      status: "verified",
+      author: { id: 50, login: "owner" },
+      claimantBinding: { status: "matched", walletMatches: true }
+    }
+  });
+  await add(store, "pr");
+  const linked = selfMergeReview(store, selfMergeLookup({
+    author: { id: 99, login: "sock" },
+    mergedBy: { id: 50, login: "owner" },
+    repoOwner: { id: 50, login: "owner" }
+  }));
+  await linked.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(linked.calls, []);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+
+  const fresh = new MemoryStateStore();
+  await add(fresh, "pr");
+  const unlinked = selfMergeReview(fresh, selfMergeLookup({
+    author: { id: 99, login: "sock" },
+    mergedBy: { id: 50, login: "owner" },
+    repoOwner: { id: 50, login: "owner" }
+  }));
+  await unlinked.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(unlinked.calls, ["verify"]);
 });

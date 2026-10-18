@@ -9,6 +9,7 @@ import {
   clearMaintainerRepoCooldown,
   loadMaintainerRepoCooldownConfig
 } from "./maintainer-repo-cooldown.js";
+import { readGithubPrSelfMergeStatus } from "./github-claim-guardrails.js";
 import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
@@ -749,7 +750,9 @@ export class PlatformService {
   }
 
   async getGithubAuthors() {
-    this.githubAuthorsProvider ??= createGithubAuthorsProvider(this.stateStore);
+    this.githubAuthorsProvider ??= createGithubAuthorsProvider(this.stateStore, {
+      selfIdentityRegistry: this.selfIdentityRegistry
+    });
     return this.githubAuthorsProvider();
   }
 
@@ -1087,6 +1090,7 @@ export class PlatformService {
     }]));
     const maintainerRepoClaimCap = await this.jobExecutionService.getMaintainerRepoClaimCapStatus();
     const maintainerRepoCooldown = await this.jobExecutionService.getMaintainerRepoCooldownStatus();
+    const githubPrSelfMerge = await readGithubPrSelfMergeStatus(this.stateStore);
 
     return {
       auth: auth
@@ -1124,7 +1128,8 @@ export class PlatformService {
         firstWithdrawalGasGrants,
         topJobs,
         maintainerRepoClaimCap,
-        maintainerRepoCooldown
+        maintainerRepoCooldown,
+        githubPrSelfMerge
       },
       maintenance: {
         policy,
