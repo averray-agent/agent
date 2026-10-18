@@ -122,11 +122,17 @@ test("legal pages: final public wording, truthful Verify boundaries and fixed op
     "Run records and receipts are publicly readable by run id", "Don't put personal data in them",
     "verification-target-authorization", "not stored in the run record or the logs", "memory for the run only",
     "Performance of the run you request and pay for", "legitimate interest",
-    "Run records and receipts are kept indefinitely", "Payment records for 10 years",
-    "Server logs follow the rotation described above", "OVH in the EU", "mainnet.base.org",
+    "Run records and receipts are kept indefinitely in our live database", "Payment records for 10 years",
+    "Server logs follow the rotation described above", "at OVH in France (EU)", "mainnet.base.org",
     "Base (Coinbase)", "AWS KMS (eu-central-2)"
   ]) assert.ok(privacyText.includes(claim), claim);
-  assert.match(plain(privacy.body), /Sub-processors:.*Base \(Coinbase\) \(Base RPC for payment reads and transaction broadcast\)/u);
+  const privacyBody = plain(privacy.body);
+  const termsBody = plain(terms.body);
+  assert.match(privacyBody, /Sub-processors:.*Base \(Coinbase\) \(Base RPC for payment reads and transaction broadcast\)/u);
+  assert.match(privacyBody, /Hosting is with OVH in Lille, France \(EU\)/u);
+  assert.match(privacyBody, /Logs are size-capped per service and the oldest entries are deleted automatically when the cap is reached; they are used for security and abuse prevention, not profiling\./u);
+  assert.doesNotMatch(privacyBody, /backup|short schedule|logs rotate/iu);
+  assert.doesNotMatch(termsBody, /\bbackup\b/iu);
   for (const path of ["/imprint/", "/pricing/"]) assert.ok(terms.querySelector(`a[href="${path}"]`));
   assert.ok(privacy.querySelector('[data-verify-privacy] a[href="/terms/"]'));
 });
