@@ -381,29 +381,40 @@ async function fetchStopComments(issue, { githubToken, fetchImpl, logger }) {
     "user-agent": "agent-platform-issue-ingestor"
   };
   if (githubToken) headers.authorization = `Bearer ${githubToken}`;
-  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}&sort=created&direction=desc`;
-  try {
-    const response = await fetchImpl(url, { headers });
-    if (!response?.ok || typeof response.json !== "function") {
+  // Per-issue comments are oldest-first; this endpoint ignores sort/direction.
+  // The search count locates the last page. A short last page needs the tail
+  // of its predecessor to cover up to 20 recent comments with at most two reads.
+  const page = Math.max(1, Math.ceil(count / MAINTAINER_STOP_COMMENT_LIMIT));
+  async function fetchPage(pageNumber) {
+    const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}&page=${pageNumber}`;
+    try {
+      const response = await fetchImpl(url, { headers });
+      if (!response?.ok || typeof response.json !== "function") {
+        logger?.warn?.({
+          event: "maintainer_stop_comment_fetch_failed",
+          repo,
+          issueNumber: number,
+          status: Number.isInteger(response?.status) ? response.status : null
+        }, "maintainer_stop_comment_fetch_failed");
+        return null;
+      }
+      const body = await response.json();
+      if (!Array.isArray(body)) return null;
+      return body;
+    } catch {
       logger?.warn?.({
         event: "maintainer_stop_comment_fetch_failed",
         repo,
-        issueNumber: number,
-        status: Number.isInteger(response?.status) ? response.status : null
+        issueNumber: number
       }, "maintainer_stop_comment_fetch_failed");
-      return [];
+      return null;
     }
-    const body = await response.json();
-    if (!Array.isArray(body)) return [];
-    return body.slice(0, MAINTAINER_STOP_COMMENT_LIMIT);
-  } catch {
-    logger?.warn?.({
-      event: "maintainer_stop_comment_fetch_failed",
-      repo,
-      issueNumber: number
-    }, "maintainer_stop_comment_fetch_failed");
-    return [];
   }
+  const last = await fetchPage(page);
+  if (!last) return [];
+  const previous = last.length < MAINTAINER_STOP_COMMENT_LIMIT && count > MAINTAINER_STOP_COMMENT_LIMIT
+    ? await fetchPage(page - 1) : [];
+  return [...(previous ?? []), ...last].slice(-MAINTAINER_STOP_COMMENT_LIMIT);
 }
 
 function maintainerCommentSources(issue) {
