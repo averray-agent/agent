@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { MemoryStateStore } from "./state-store.js";
+import { readGithubAuthors } from "../services/github-author-visibility.js";
 import {
   PUBLIC_IDENTITY_CLASSES,
   SELF_IDENTITY_AUTHORITY,
@@ -9,6 +11,7 @@ import {
   SelfIdentityRegistry,
   createSelfIdentityRegistry,
   describeSelfIdentity,
+  editAdminOurs,
   normalizeApiKeyId
 } from "./self-identity-registry.js";
 
@@ -214,4 +217,62 @@ test("session classification follows durable canary evidence through the shared 
     authority: "shared_self_identity_registry",
     evidence: "wallet_bound_canary_marker"
   });
+});
+
+test("an empty admin ours list classifies exactly as a registry that has never heard of it", async () => {
+  const plain = new SelfIdentityRegistry({ operatorWallets: [OPERATOR] });
+  const hydrated = new SelfIdentityRegistry({ operatorWallets: [OPERATOR] });
+  await hydrated.hydrateAdminOurs({ getServiceState: async () => null });
+  for (const wallet of [OPERATOR, OUTSIDER]) {
+    assert.deepEqual(hydrated.classify({ wallet }), plain.classify({ wallet }));
+  }
+  assert.equal(JSON.stringify(describeSelfIdentity(hydrated.classify({ wallet: OUTSIDER }))).includes(OUTSIDER), false);
+});
+
+test("a canary job tag marks the claimant as ours without listing the wallet", () => {
+  const registry = new SelfIdentityRegistry();
+  const tagged = registry.classify({
+    wallet: OUTSIDER,
+    session: { jobSnapshot: { definition: { id: "ordinary-job", disposableProof: true } } }
+  });
+  assert.equal(tagged.actor, "self");
+  assert.equal(tagged.evidence, "canary_job_tag");
+  const byId = registry.classify({
+    wallet: OUTSIDER,
+    session: { jobSnapshot: { definition: { id: "worker-canary-1786453506586" } } }
+  });
+  assert.equal(byId.evidence, "canary_job_tag");
+  assert.equal(registry.classify({
+    wallet: OUTSIDER,
+    session: { jobSnapshot: { definition: { id: "ordinary-job" } } }
+  }).actor, "external");
+  assert.equal(JSON.stringify(describeSelfIdentity(tagged)).includes(OUTSIDER), false);
+});
+
+test("an admin ours wallet is excluded from the external lane burst and the public warning", async () => {
+  const registry = new SelfIdentityRegistry();
+  const store = new MemoryStateStore();
+  const ours = "0x" + "ab".repeat(20);
+  const external = (n) => "0x" + n.toString(16).padStart(40, "0");
+  await editAdminOurs(store, {
+    action: "add", wallet: ours, label: "dogfood", purpose: "dogfood",
+    addedBy: OPERATOR, reason: "listed", logger: { info() {} }
+  });
+  await registry.hydrateAdminOurs(store);
+  const t0 = Date.parse("2026-10-14T03:00:00.000Z");
+  const claim = (id, wallet) => ({
+    sessionId: id, wallet, status: "claimed", claimedAt: new Date(t0).toISOString(),
+    jobSnapshot: { definition: { verifierMode: "github_pr", source: { type: "github_issue", repo: "example/project", githubRepoId: 11, issueNumber: 1 } } }
+  });
+  for (const session of [claim("ours", ours), claim("e1", external(2)), claim("e2", external(3))]) {
+    await store.upsertSession(session);
+  }
+  const result = await readGithubAuthors(store, {
+    now: new Date(t0 + 60_000),
+    selfIdentityRegistry: registry
+  });
+  assert.equal(result.warnings.some((warning) => warning.code === "github_lane_claim_burst"), false);
+  assert.equal(result.claimGuardrails.lane.ours >= 1, true);
+  assert.equal(JSON.stringify(result.warnings).includes(ours), false);
+  assert.equal(JSON.stringify(describeSelfIdentity(registry.classify({ wallet: ours }))).includes(ours), false);
 });

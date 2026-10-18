@@ -34,6 +34,7 @@ export async function readGithubAuthors(stateStore, {
   selfIdentityRegistry = createSelfIdentityRegistry(),
   guardrails = loadGithubClaimGuardrailConfig()
 } = {}) {
+  if (selfIdentityRegistry?.hydrateAdminOurs) await selfIdentityRegistry.hydrateAdminOurs(stateStore);
   if (!sessions) {
     sessions = [];
     for (let offset = 0; offset < MAX_SESSIONS; offset += PAGE_SIZE) {

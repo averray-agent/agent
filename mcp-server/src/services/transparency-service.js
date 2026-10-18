@@ -522,6 +522,7 @@ export class TransparencyService {
             : "stateStore.listRecentSessions + stateStore.getFundedJob(sourceType)"
         }
       ]));
+      await this.selfIdentityRegistry.hydrateAdminOurs?.(this.stateStore);
       const workerCounts = { outsiders: 0, ours: 0, unknown: 0 };
       const externalSessions = [];
       for (const session of last24h) {

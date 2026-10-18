@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+
 import { isHostedCanaryClaimant } from "./claimant-attribution.js";
+import { ConflictError, ValidationError } from "./errors.js";
 
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const SELF_CLIENT_PREFIX = "averray-";
@@ -28,6 +31,16 @@ export const PUBLIC_IDENTITY_CLASSES = Object.freeze({
   EXTERNAL: "external",
   UNKNOWN: "unknown"
 });
+
+export const ADMIN_OURS_SCOPE = "self-identity-admin-ours";
+export const ADMIN_OURS_LABELS = Object.freeze({
+  canary: SELF_IDENTITY_KINDS.CANARY,
+  acceptance: SELF_IDENTITY_KINDS.ACCEPTANCE,
+  "qa-engineer": SELF_IDENTITY_KINDS.QA_ENGINEER,
+  "blind-user": SELF_IDENTITY_KINDS.BLIND_USER,
+  dogfood: SELF_IDENTITY_KINDS.OPERATOR
+});
+const CANARY_JOB_ID = /^worker-canary-[a-z0-9-]{1,80}$/iu;
 
 /**
  * One truth source for deciding whether a wallet/client is Averray-operated.
@@ -70,6 +83,7 @@ export class SelfIdentityRegistry {
     this.viewerWallets = walletSet(viewerWallets);
     this.selfClients = clientSet(selfClients);
     this.ambiguousClients = clientSet(ambiguousClients);
+    this.adminOurs = new Map();
   }
 
   classify({ wallet, clientInfo, session, canaryMarkerValid, apiKeyId } = {}) {
@@ -78,6 +92,9 @@ export class SelfIdentityRegistry {
 
     if (canaryMarkerValid === true || isHostedCanaryClaimant(session)) {
       return selfIdentity(SELF_IDENTITY_KINDS.CANARY, "wallet_bound_canary_marker");
+    }
+    if (isCanaryTaggedJob(sessionJob(session))) {
+      return selfIdentity(SELF_IDENTITY_KINDS.CANARY, "canary_job_tag");
     }
     // A presented-but-invalid marker is positive evidence of nothing. Keep the
     // old fail-safe direction: it cannot borrow another static classification.
@@ -116,6 +133,8 @@ export class SelfIdentityRegistry {
       if (this.viewerWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.VIEWER, "operator_viewer_wallet_registry");
       }
+      const adminOurs = this.adminOurs.get(normalizedWallet);
+      if (adminOurs) return selfIdentity(adminOurs.kind, "admin_ours_registry");
       return externalIdentity("unlisted_wallet");
     }
 
@@ -165,6 +184,31 @@ export class SelfIdentityRegistry {
 
   replaceAmbiguousClients(values) {
     this.ambiguousClients = clientSet(values);
+  }
+
+  replaceAdminOurs(entries) {
+    const next = new Map();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const wallet = normalizeWallet(entry?.wallet);
+      const kind = ADMIN_OURS_LABELS[entry?.label];
+      if (!wallet || !kind) continue;
+      next.set(wallet, { kind, label: entry.label });
+    }
+    this.adminOurs = next;
+  }
+
+  async hydrateAdminOurs(stateStore) {
+    if (typeof stateStore?.getServiceState !== "function") {
+      this.replaceAdminOurs([]);
+      return this;
+    }
+    try {
+      const stored = await stateStore.getServiceState(ADMIN_OURS_SCOPE);
+      this.replaceAdminOurs(Array.isArray(stored?.wallets) ? stored.wallets : []);
+    } catch {
+      // An unread store is not evidence that the list is empty.
+    }
+    return this;
   }
 
   classifyApiKeyId(apiKeyId) {
@@ -251,6 +295,74 @@ export function describeSelfIdentity(identity) {
     authority: SELF_IDENTITY_AUTHORITY,
     evidence: identity?.evidence ?? "identity_unavailable"
   };
+}
+
+export function isCanaryTaggedJob(job) {
+  if (!job || typeof job !== "object" || Array.isArray(job)) return false;
+  if (job.disposableProof === true) return true;
+  return typeof job.id === "string" && CANARY_JOB_ID.test(job.id);
+}
+
+function sessionJob(session) {
+  const snapshot = session?.jobSnapshot?.definition ?? session?.job;
+  return snapshot && typeof snapshot === "object" ? snapshot : null;
+}
+
+const PURPOSE_RE = /^[a-z0-9][a-z0-9 _./-]{0,80}$/iu;
+
+export async function editAdminOurs(stateStore, {
+  action,
+  wallet,
+  label,
+  purpose,
+  addedBy,
+  reason,
+  now = new Date(),
+  logger
+} = {}) {
+  if (action !== "add" && action !== "remove") {
+    throw new ValidationError("Action must be add or remove.");
+  }
+  const normalized = normalizeWallet(wallet);
+  if (!normalized) throw new ValidationError("A wallet address is required.");
+  if (action === "add" && !ADMIN_OURS_LABELS[label]) {
+    throw new ValidationError("Label must be canary, acceptance, qa-engineer, blind-user, or dogfood.");
+  }
+  if (action === "add" && !PURPOSE_RE.test(String(purpose ?? ""))) {
+    throw new ValidationError("Purpose must be a short label.");
+  }
+  if (typeof reason !== "string" || !reason.trim()) {
+    throw new ValidationError("A reason is required.");
+  }
+  const owner = randomUUID();
+  const acquired = await stateStore.acquireClaimLock?.(ADMIN_OURS_SCOPE, owner, 30);
+  if (acquired === false) {
+    throw new ConflictError("Another edit of the ours list is in progress.", "self_identity_ours_in_progress");
+  }
+  try {
+    const stored = await stateStore.getServiceState?.(ADMIN_OURS_SCOPE);
+    const wallets = Array.isArray(stored?.wallets) ? stored.wallets.filter((entry) => normalizeWallet(entry?.wallet)) : [];
+    const without = wallets.filter((entry) => normalizeWallet(entry.wallet) !== normalized);
+    const next = action === "remove" ? without : [...without, {
+      wallet: normalized,
+      label,
+      purpose: String(purpose).trim(),
+      addedBy: normalizeWallet(addedBy) ?? null,
+      addedAt: new Date(now).toISOString()
+    }];
+    await stateStore.upsertServiceState?.(ADMIN_OURS_SCOPE, { wallets: next });
+    logger?.info?.({
+      event: "self_identity_ours_edited",
+      action,
+      label: action === "add" ? label : null,
+      purpose: action === "add" ? String(purpose).trim() : null,
+      wallet: normalized,
+      addedBy: normalizeWallet(addedBy) ?? null
+    }, "self_identity_ours_edited");
+    return { action, label: action === "add" ? label : null, count: next.length, wallets: next };
+  } finally {
+    await stateStore.releaseClaimLock?.(ADMIN_OURS_SCOPE, owner);
+  }
 }
 
 function selfIdentity(kind, evidence) {

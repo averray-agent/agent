@@ -162,7 +162,8 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
       ["POST", "/admin/jobs/pause"],
       ["POST", "/admin/jobs/resume"],
       ["GET", "/admin/jobs/timeline"],
-      ["POST", "/admin/maintainer-repos/:repoId/cooldown/clear"]
+      ["POST", "/admin/maintainer-repos/:repoId/cooldown/clear"],
+      ["POST", "/admin/self-identity/ours"]
     ]),
     ...roleGatedRoutes("operator observability", [
       ["GET", "/admin/sessions"],

@@ -137,6 +137,7 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
     getRouteCapabilityRequirements("POST", "/admin/maintainer-repos/424242/cooldown/clear"),
     ["jobs:lifecycle"]
   );
+  assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/self-identity/ours"), ["jobs:lifecycle"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/deposit/transactions"), ["account:read"]);

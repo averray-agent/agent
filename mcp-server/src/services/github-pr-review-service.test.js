@@ -607,6 +607,8 @@ test("a merger who is the pull author is held for human review and never auto-sl
   await review.runOnce(new Date("2026-10-08T12:30:00.000Z"));
   assert.deepEqual(calls, []);
   assert.equal((await readGithubPrSelfMergeStatus(store)).held, 1);
+  const again = await store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(again.heldAt, observation.heldAt);
 });
 
 test("log mode records the self-merge hold and still settles", async () => {

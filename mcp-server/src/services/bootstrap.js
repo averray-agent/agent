@@ -583,6 +583,7 @@ export async function createPlatformRuntime() {
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger, metrics }));
   await waitForStateStoreAtBoot(stateStore, { logger });
+  await selfIdentityRegistry.hydrateAdminOurs(stateStore);
   gateway.transactionStore = stateStore;
   try {
     await repairWalletSessionIndex({ stateStore, logger });
