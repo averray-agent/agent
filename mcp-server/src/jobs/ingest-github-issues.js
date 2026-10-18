@@ -75,7 +75,8 @@ export async function ingestGithubIssues({
   minScore = 55,
   githubToken = undefined,
   fetchImpl = fetch,
-  maintainerPolicy = {}
+  maintainerPolicy = {},
+  logger = console
 } = {}) {
   const issues = await searchIssues({
     query,
@@ -84,16 +85,17 @@ export async function ingestGithubIssues({
     fetchImpl
   });
   const scored = await Promise.all(issues.map(async (issue) => {
-    const withComments = await withStopComments(issue, { githubToken, fetchImpl });
-    let policy = await evaluateMaintainerSurfaceForIssue(withComments, {
+    const stopComments = await fetchStopComments(issue, { githubToken, fetchImpl, logger });
+    const forStop = { ...issue, stopComments };
+    let policy = await evaluateMaintainerSurfaceForIssue(issue, {
       githubToken,
       fetchImpl,
       ...maintainerPolicy
     });
-    if (policy.allowed && maintainerCommentSources(withComments).length > 0) {
+    if (policy.allowed && maintainerCommentSources(forStop).length > 0) {
       policy = { ...policy, allowed: false, reason: "maintainer_stop_signal" };
     }
-    return { issue: withComments, score: scoreIssue(withComments), policy };
+    return { issue: forStop, score: scoreIssue(issue), policy };
   }));
   const skippedRows = scored.filter(({ score, policy }) => score < minScore || !policy.allowed);
   const stopIssues = skippedRows
@@ -360,35 +362,56 @@ export function maintainerStopSources(issue, policy) {
   return [...new Set(sources)];
 }
 
-async function withStopComments(issue, { githubToken, fetchImpl }) {
-  if (Array.isArray(issue?.comments)) return issue;
+function commentCount(issue) {
+  const count = Number(issue?.comments);
+  return Number.isInteger(count) && count >= 0 ? count : null;
+}
+
+async function fetchStopComments(issue, { githubToken, fetchImpl, logger }) {
+  if (Array.isArray(issue?.stopComments)) return issue.stopComments;
+  if (Array.isArray(issue?.comments)) return issue.comments;
+  const count = commentCount(issue);
+  if (count === 0 || count === null) return [];
   const repo = repoFullName(issue);
   const number = Number(issue?.number);
   const [owner, name] = String(repo).split("/");
-  if (!owner || !name || !Number.isInteger(number) || number <= 0) return issue;
+  if (!owner || !name || !Number.isInteger(number) || number <= 0) return [];
   const headers = {
     accept: "application/vnd.github+json",
     "user-agent": "agent-platform-issue-ingestor"
   };
   if (githubToken) headers.authorization = `Bearer ${githubToken}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}&sort=created&direction=desc`;
   try {
-    const response = await fetchImpl(
-      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}/comments?per_page=${MAINTAINER_STOP_COMMENT_LIMIT}`,
-      { headers }
-    );
-    if (!response?.ok || typeof response.json !== "function") return issue;
+    const response = await fetchImpl(url, { headers });
+    if (!response?.ok || typeof response.json !== "function") {
+      logger?.warn?.({
+        event: "maintainer_stop_comment_fetch_failed",
+        repo,
+        issueNumber: number,
+        status: Number.isInteger(response?.status) ? response.status : null
+      }, "maintainer_stop_comment_fetch_failed");
+      return [];
+    }
     const body = await response.json();
-    if (!Array.isArray(body)) return issue;
-    return { ...issue, comments: body.slice(0, MAINTAINER_STOP_COMMENT_LIMIT) };
+    if (!Array.isArray(body)) return [];
+    return body.slice(0, MAINTAINER_STOP_COMMENT_LIMIT);
   } catch {
-    return issue;
+    logger?.warn?.({
+      event: "maintainer_stop_comment_fetch_failed",
+      repo,
+      issueNumber: number
+    }, "maintainer_stop_comment_fetch_failed");
+    return [];
   }
 }
 
 function maintainerCommentSources(issue) {
-  if (!Array.isArray(issue?.comments)) return [];
+  const comments = Array.isArray(issue?.stopComments)
+    ? issue.stopComments
+    : Array.isArray(issue?.comments) ? issue.comments : [];
   const sources = [];
-  for (const comment of issue.comments) {
+  for (const comment of comments) {
     if (!isMaintainerAssociation(comment?.author_association)) continue;
     if (scanPolicyText(comment?.body).reason !== "maintainer_stop_signal") continue;
     const commentId = Number(comment?.id);

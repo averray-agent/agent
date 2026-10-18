@@ -164,7 +164,8 @@ export class GithubIssueIngestionScheduler {
             denylistRepos: this.denylistRepos,
             scanRepoPolicies: this.scanRepoPolicies,
             openPrCap: this.openPrCap
-          }
+          },
+          logger: this.logger
         });
         summary.candidateCount += result.count;
         const querySummary = {

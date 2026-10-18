@@ -217,6 +217,10 @@ function countableCloses(closes, clearedAtMs) {
   });
 }
 
+function displayedCloseCount(closes, clearedAt, now) {
+  return closesInWindow(countableCloses(closes, parseTime(clearedAt)), now.getTime()).length;
+}
+
 function nextCloseRecord(record, { repoId, fullName, key, closedAt, config }) {
   const permanent = permanentPullKeys(record);
   const resolvedName = fullName || record?.fullName || null;
@@ -347,7 +351,7 @@ export async function recordMaintainerStopSignal({
       cooldownUntil: "indefinite",
       cooldownReason: "maintainer_stop_signal",
       lastMaintainerCloseAt: existing?.lastMaintainerCloseAt ?? null,
-      closeCount30d: closesInWindow(closes, now.getTime()).length,
+      closeCount30d: displayedCloseCount(closes, existing?.clearedAt, now),
       closes,
       countedPullKeys: [...permanentPullKeys(existing)],
       stopSources: [...sources],
@@ -394,7 +398,7 @@ export async function clearMaintainerRepoCooldown({
       repoId: id,
       cooldownUntil: null,
       cooldownReason: null,
-      closeCount30d: closesInWindow(closes, now.getTime()).length,
+      closeCount30d: displayedCloseCount(closes, now.toISOString(), now),
       closes,
       countedPullKeys: [...permanentPullKeys(existing)],
       stopSources: [...knownStopSources(existing)],

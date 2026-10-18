@@ -187,7 +187,7 @@ test("a stop signal sets indefinite and only the operator clear removes it", asy
     cleared: true,
     cooldownUntil: null,
     cooldownReason: null,
-    closeCount30d: 1
+    closeCount30d: 0
   });
   assert.equal(JSON.stringify(cleared).includes(WALLET), false);
   assert.equal(JSON.stringify(cleared).includes("old/name"), false);
@@ -212,6 +212,7 @@ test("a stop signal sets indefinite and only the operator clear removes it", asy
     stateStore, repoId: REPO_ID, source: "policy:CODE_OF_CONDUCT.md", now: new Date(NOW.getTime() + 5 * DAY)
   });
   assert.equal(fresh.record.cooldownUntil, "indefinite");
+  assert.equal(fresh.record.closeCount30d, 0);
   assert.equal(readCooldownDecision(await getMaintainerRepoCooldown(stateStore, REPO_ID)).active, true);
 
   await assert.rejects(
@@ -562,6 +563,23 @@ test("a close from before an operator clear does not re-arm the cooldown", async
   assert.equal(fresh.record.cooldownReason, "maintainer_close");
   assert.equal(fresh.record.closeCount30d, 1);
   assert.equal(fresh.record.cooldownUntil, new Date(freshAt.getTime() + 7 * DAY).toISOString());
+});
+
+test("a short repeat window cannot shorten a longer active cooldown", async () => {
+  const stateStore = new MemoryStateStore();
+  const config = { days: 7, repeatDays: 1 };
+  const firstAt = new Date("2026-10-01T00:00:00.000Z");
+  const secondAt = new Date("2026-10-03T00:00:00.000Z");
+  const first = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 1, closedAt: firstAt, now: firstAt, config
+  });
+  const second = await recordMaintainerClose({
+    stateStore, repoId: REPO_ID, pullNumber: 2, closedAt: secondAt, now: secondAt, config
+  });
+  assert.equal(second.record.closeCount30d, 2);
+  assert.equal(second.record.cooldownUntil, first.record.cooldownUntil);
+  assert.equal(second.record.cooldownUntil, new Date(firstAt.getTime() + 7 * DAY).toISOString());
+  assert.ok(Date.parse(second.record.cooldownUntil) > secondAt.getTime() + DAY);
 });
 
 test("the same pull request re-observed on days 0, 31 and 62 counts once and never extends", async () => {

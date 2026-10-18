@@ -227,6 +227,82 @@ test("ingestGithubIssues uses an embedded repository id and omits it when lookup
   assert.equal(failed.jobs[0].source.githubRepoId, undefined);
 });
 
+test("fetched stop comments do not replace the search comment count used for scoring", async () => {
+  const body = "The parser currently accepts an invalid edge case. Add a regression test and improve the validation error so the message stays specific.";
+  const crowded = { ...GOOD_ISSUE, body, comments: 40 };
+  const quiet = { ...crowded, comments: 2 };
+  assert.equal(scoreIssue(crowded), scoreIssue(quiet) - 10);
+  const calls = [];
+  const logs = [];
+  const payload = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    logger: { warn(payload, message) { logs.push({ payload, message }); }, info() {} },
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [crowded] }; } };
+      }
+      if (String(url).includes("/comments")) {
+        return {
+          ok: true,
+          async json() {
+            return Array.from({ length: 20 }, (_, index) => ({
+              id: index + 1,
+              author_association: "NONE",
+              body: "thanks"
+            }));
+          }
+        };
+      }
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.equal(payload.jobs.length, 1);
+  assert.equal(payload.jobs[0].source.comments, 40);
+  assert.equal(payload.jobs[0].source.score, scoreIssue(crowded));
+  assert.equal(Number.isNaN(payload.jobs[0].source.comments), false);
+  const commentUrl = calls.find((url) => url.includes("/comments"));
+  assert.match(commentUrl, /sort=created/);
+  assert.match(commentUrl, /direction=desc/);
+  assert.match(commentUrl, /per_page=20/);
+  assert.equal(logs.length, 0);
+
+  const skipped = [];
+  await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    fetchImpl: async (url) => {
+      if (String(url).includes("/comments")) skipped.push(String(url));
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [{ ...crowded, comments: 0 }] }; } };
+      }
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.deepEqual(skipped, []);
+
+  const failed = [];
+  await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    logger: { warn(payload, message) { failed.push({ payload, message }); } },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [crowded] }; } };
+      }
+      if (String(url).includes("/comments")) throw new Error("comment read down");
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.equal(failed[0].payload.event, "maintainer_stop_comment_fetch_failed");
+  assert.equal(failed[0].payload.issueNumber, 42);
+  assert.equal(JSON.stringify(failed).includes("comment read down"), false);
+});
+
 test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests", async () => {
   const payload = await ingestGithubIssues({
     query: "is:issue is:open label:good-first-issue",
