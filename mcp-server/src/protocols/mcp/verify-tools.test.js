@@ -3,7 +3,7 @@ import test from "node:test";
 import { TypedDataEncoder, Wallet } from "ethers";
 import { MemoryStateStore } from "../../core/state-store.js";
 import { VerificationRunService } from "../../services/verification-run-service.js";
-import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
+import { VerificationProfileRegistry, VERIFY_PROFILE_PRICES } from "../../services/verification-profile-registry.js";
 import { X402VerificationPaymentGate } from "../../payments/x402-verification-payment-gate.js";
 import { createVerifyRoutes } from "../http/verify-routes.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
@@ -24,7 +24,7 @@ const request = {
 };
 const context = { request: { headers: {}, socket: { remoteAddress: "192.0.2.10" } } };
 
-function harness({ balance = 5_000_000n, balanceError } = {}) {
+function harness({ balance = BigInt(VERIFY_PROFILE_PRICES[request.profile].amountRaw), balanceError } = {}) {
   const calls = { limits: [], captures: 0, logs: [], balances: [] };
   const store = new MemoryStateStore();
   const gate = new X402VerificationPaymentGate({
@@ -32,7 +32,7 @@ function harness({ balance = 5_000_000n, balanceError } = {}) {
       asset: domain.verifyingContract, payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100 },
+    provider: { send: async (method) => { assert.equal(method, "eth_chainId"); return "0x2105"; }, getBlockNumber: async () => 100 },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain), authorizationState: async () => false,
       balanceOf: async (payer) => { calls.balances.push(payer); if (balanceError) throw balanceError; return balance; } },
     captureTokenContract: { transferWithAuthorization: async () => { calls.captures++; throw new Error("unexpected capture"); } },
@@ -54,10 +54,10 @@ function harness({ balance = 5_000_000n, balanceError } = {}) {
   return { store, service, gate, route, execute, mcp, calls };
 }
 
-async function proof(challenge) {
+async function proof(challenge, { value = challenge.accepts[0].amount } = {}) {
   const wallet = Wallet.createRandom();
   const authorization = {
-    from: wallet.address, to: challenge.accepts[0].payTo, value: challenge.accepts[0].amount,
+    from: wallet.address, to: challenge.accepts[0].payTo, value,
     validAfter: String(NOW.getTime() / 1000 - 1), validBefore: String(NOW.getTime() / 1000 + 900),
     nonce: "0x" + "c".repeat(64)
   };
@@ -350,4 +350,69 @@ test("X2 historical not_billed run is projected as not_captured without rewritin
   assert.equal(response.billing.status, "not_captured");
   assert.equal(response.billingRule, VERIFY_BILLING_RULE);
   assert.equal((await h.store.getVerificationRun("legacy")).billing.status, "not_billed");
+});
+
+// These expected product prices are deliberately independent of the registry:
+// mutating policy or wiring every profile to one price must turn this gate red.
+const approvedPrices = {
+  "git-patch-tests-v1": ["5", "5000000"],
+  "mcp-failure-semantics-v1": ["0.25", "250000"],
+  "structured-output-evidence-v1": ["0.25", "250000"]
+};
+for (const profile of new VerificationProfileRegistry().list()) {
+  test(`pricing: ${profile.ref} registry, HTTP, MCP and exact-balance admission agree`, async () => {
+    const [amount, amountRaw] = approvedPrices[profile.name];
+    assert.ok(Object.isFrozen(VERIFY_PROFILE_PRICES));
+    assert.ok(Object.isFrozen(VERIFY_PROFILE_PRICES[profile.name]));
+    assert.deepEqual(profile.price, { amount, amountRaw, asset: "USDC", decimals: 6,
+      network: "eip155:8453", billingRule: "inconclusive_not_billed" });
+    const input = profile.workedExample.request;
+    for (const balance of [BigInt(amountRaw) - 1n, BigInt(amountRaw)]) {
+      const h = harness({ balance });
+      const profiles = await invokeHttpRoute(h.route, { method: "GET", path: "/verify/profiles" });
+      assert.deepEqual(profiles.body.profiles.find((p) => p.ref === profile.ref).price, profile.price);
+      const direct = await invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: input });
+      assert.equal(direct.statusCode, 402);
+      assert.equal(direct.body.accepts.length, 1);
+      assert.equal(direct.body.accepts[0].amount, amountRaw);
+      assert.equal(direct.body.accepts[0].extra.profile, profile.ref);
+      const { ranWork, customerFunds, ...quote } = await h.execute("quoteVerificationRun", input, context);
+      assert.deepEqual(quote, direct.body);
+      assert.equal(ranWork, false);
+      assert.equal(customerFunds, "unchanged");
+      const paid = await proof(quote);
+      const start = () => h.execute("startVerificationRun", { ...input, paymentSignature: paid.header }, context);
+      if (balance < BigInt(amountRaw)) {
+        await assert.rejects(start(), { code: "payment_insufficient_balance" });
+        assert.equal(h.store.verificationRuns.size, 0);
+      } else {
+        const run = await start();
+        assert.equal(run.billing.amountRaw, amountRaw);
+        assert.equal(run.billing.amount, amount);
+        const authorization = await h.store.getVerificationRunAuthorization(run.runId);
+        assert.equal(authorization.amountRaw, amountRaw);
+        assert.equal(authorization.authorization.value, amountRaw);
+      }
+      assert.equal(h.calls.balances.length, 1);
+      assert.equal(h.calls.captures, 0);
+    }
+  });
+}
+
+test("pricing: a light authorization cannot buy a heavy run, even when its accepted envelope is changed", async () => {
+  const h = harness();
+  const light = await h.execute("quoteVerificationRun", request, context);
+  const heavyInput = h.service.listProfiles().find((p) => p.name === "git-patch-tests-v1").workedExample.request;
+  const heavy = await h.execute("quoteVerificationRun", heavyInput, context);
+  const signed = await proof(light);
+  await assert.rejects(h.execute("startVerificationRun", { ...heavyInput, paymentSignature: signed.header }, context),
+    { code: "payment_requirements_mismatch" });
+  // Sign the cheap value while claiming to accept the heavy requirement. This
+  // specifically exercises normalizeAuthorization, beyond the envelope guard.
+  const forged = await proof(heavy, { value: light.accepts[0].amount });
+  await assert.rejects(h.execute("startVerificationRun", { ...heavyInput, paymentSignature: forged.header }, context),
+    { code: "payment_exact_price_required" });
+  assert.equal(h.calls.balances.length, 0);
+  assert.equal(h.store.verificationRuns.size, 0);
+  assert.equal(h.calls.captures, 0);
 });

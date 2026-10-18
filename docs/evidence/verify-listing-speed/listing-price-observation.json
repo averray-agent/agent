@@ -1,0 +1,69 @@
+{
+  "observed_at": "2026-10-16T20:55:14.029123+00:00",
+  "attribution": "Data: x402-list.com (CC BY 4.0)",
+  "sources": [
+    "https://x402-list.com/services/averray-verify",
+    "https://x402-list.com/api/v1/services/averray-verify",
+    "https://x402-list.com/api/v1/services/averray-verify/checks",
+    "https://api.averray.com/.well-known/x402",
+    "https://api.averray.com/verify/runs"
+  ],
+  "listing": {
+    "last_checked_at": "2026-10-16T20:29:09.756Z",
+    "min_price_usd": 0.25,
+    "captured_at": "2026-10-16T16:57:01.926Z",
+    "captured_accepts": [
+      {
+        "profile": "mcp-failure-semantics-v1@1",
+        "amount": "250000"
+      }
+    ],
+    "endpoint_prices": [
+      {
+        "path": "/verify/runs",
+        "method": "POST",
+        "min_price_usd": 0.25,
+        "pricing": [
+          {
+            "price": "250000",
+            "price_usd": "0.2500000000"
+          }
+        ]
+      }
+    ]
+  },
+  "live_discovery": {
+    "maxAmountRequired": "5000000",
+    "accepts": [
+      {
+        "profile": "mcp-failure-semantics-v1@1",
+        "amount": "250000"
+      },
+      {
+        "profile": "git-patch-tests-v1@1",
+        "amount": "5000000"
+      },
+      {
+        "profile": "structured-output-evidence-v1@1",
+        "amount": "250000"
+      }
+    ]
+  },
+  "live_unpaid_402": {
+    "accepts": [
+      {
+        "profile": "mcp-failure-semantics-v1@1",
+        "amount": "250000"
+      },
+      {
+        "profile": "git-patch-tests-v1@1",
+        "amount": "5000000"
+      },
+      {
+        "profile": "structured-output-evidence-v1@1",
+        "amount": "250000"
+      }
+    ]
+  },
+  "interpretation": "The displayed minimum matches captured accepts.amount, not the discovery maximum. Captured envelope has one accept; exact min(all accepts) versus first-entry selection cannot be distinguished from public evidence. No public crawler source was found."
+}

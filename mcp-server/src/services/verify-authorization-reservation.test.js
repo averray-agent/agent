@@ -35,7 +35,7 @@ async function fixture(t, backend) {
       asset: domain.verifyingContract.toLowerCase(), payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }),
+    provider: { send: async (method) => { assert.equal(method, "eth_chainId"); return "0x2105"; },
       getBlockNumber: async () => { calls.blockReads++; if (clock.blockError) throw clock.blockError; return 100; } },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain),
       balanceOf: async (payer) => { calls.balances.push(payer); if (clock.balanceError) throw clock.balanceError; return clock.balance; },

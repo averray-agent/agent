@@ -99,6 +99,7 @@ test("profile 2 cannot enter the profile-1 code sandbox", async () => {
   const mcpRun = await queueRun(stateStore, "verify-mcp");
   mcpRun.profile = "mcp-failure-semantics-v1";
   mcpRun.profileRef = "mcp-failure-semantics-v1@1";
+  mcpRun.billing = { status: "authorized", ...PROFILE_REGISTRY.get(mcpRun.profile, 1).price };
   mcpRun.target = { endpoint: "https://mcp.example.test", transport: "streamable_http" };
   mcpRun.inputs = {};
   await stateStore.updateVerificationRun(mcpRun.runId, mcpRun);
@@ -125,6 +126,7 @@ test("profile 3 is routed to its structured-output runner and never the profile-
   const structuredRun = await queueRun(stateStore, "verify-structured");
   structuredRun.profile = "structured-output-evidence-v1";
   structuredRun.profileRef = STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF;
+  structuredRun.billing = { status: "authorized", ...PROFILE_REGISTRY.get(structuredRun.profile, 1).price };
   structuredRun.target = { output: {}, schema: {}, sources: [{}] };
   structuredRun.inputs = {};
   await stateStore.updateVerificationRun(structuredRun.runId, structuredRun);

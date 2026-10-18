@@ -1,0 +1,48 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import { buildVerifyPricing } from "../../../mcp-server/src/core/verify-pricing.js";
+import { VERIFY_BILLING_RULE } from "../../../mcp-server/src/core/verify-product-copy.js";
+import "../styles/global.css";
+const pricing = buildVerifyPricing();
+---
+
+<BaseLayout title="Verify pricing — Averray" description="Per-profile Verify prices in Base USDC. Inconclusive runs are not billed." canonicalUrl={pricing.page}>
+  <main class="page">
+    <SiteNav />
+    <header class="page-hero">
+      <p class="eyebrow">Verify</p>
+      <h1 class="page-hero__title">Pay for a bounded check.</h1>
+      <p class="page-hero__lede">Choose a published profile. Its price covers one verification run and the resulting receipt.</p>
+    </header>
+    <section class="section legal" aria-labelledby="prices-heading">
+      <h2 class="section__title" id="prices-heading">Per-profile prices</h2>
+      <div class="pricing-table-wrap">
+        <table data-verify-price-table>
+          <caption>Verify prices in USDC on Base</caption>
+          <thead><tr><th scope="col">Profile</th><th scope="col">Per run</th><th scope="col">Network</th></tr></thead>
+          <tbody>{pricing.verify.map((price) => (
+            <tr data-profile={price.profile} data-billing-rule={price.billingRule}>
+              <th scope="row">{price.profile}</th><td>{price.amount} {price.asset}</td><td>{price.network}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <p data-verify-billing-rule>{VERIFY_BILLING_RULE}</p>
+      <p>Payment is authorized before the run and captured only after an approved or rejected verdict. A rejected result is a completed check and is billed. An inconclusive result is not billed.</p>
+      <p>This table is generated from the published profile registry when the site is built. Before signing, read the live 402 quote for your requested profile: that quote sets the amount for your run. Existing authorizations keep their quoted amount if prices change.</p>
+      <p><a href="https://api.averray.com/pricing">Machine-readable prices</a> · <a href="https://api.averray.com/.well-known/x402">Live payment requirements</a> · <a href="https://api.averray.com/verify/profiles">Profiles and examples</a></p>
+      <p><a href="/verify/">Start with Verify</a></p>
+    </section>
+    <SiteFooter />
+  </main>
+</BaseLayout>
+
+<style>
+  .pricing-table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  caption { text-align: left; padding-block: 0.75rem; }
+  th, td { padding: 0.8rem; border-bottom: 1px solid var(--line, #444); }
+  th[scope="row"] { overflow-wrap: anywhere; }
+</style>

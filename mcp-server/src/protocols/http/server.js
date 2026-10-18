@@ -876,6 +876,7 @@ const handleEventRoute = createEventRoutes({
 });
 
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
+  listVerificationProfiles: () => verificationRunService.listProfiles(),
   authConfig,
   buildDiscoveryManifest,
   getX402Discovery: () => buildX402DiscoveryDocument({
@@ -1040,6 +1041,7 @@ const handlePaymentRoute = createPaymentRoutes({
 
 const handleOperationalRoute = createOperationalRoutes({
   verificationRunService,
+  verificationPaymentGate,
   badgeReceiptSigner,
   authConfig,
   externalPostingMode: externalPostingService.config.mode,
@@ -1373,6 +1375,7 @@ const server = createServer(async (request, response) => {
   } catch (error) {
     const normalized = normalizeError(error);
     const extraHeaders = { "x-request-id": requestId };
+    if (normalized.code === "payment_domain_unavailable") extraHeaders["cache-control"] = "no-store";
     const retryAfter = normalized.details?.retryAfterSeconds;
     if (Number.isFinite(retryAfter)) {
       extraHeaders["retry-after"] = String(Math.max(1, Math.ceil(retryAfter)));

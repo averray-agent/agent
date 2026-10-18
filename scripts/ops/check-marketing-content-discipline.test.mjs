@@ -110,14 +110,15 @@ test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", a
         scheme: "exact",
         network: "eip155:8453",
         asset: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-        amount: "5000000",
+        amount: "250000",
+        extra: { profile: "mcp-failure-semantics-v1@1" },
         payTo: "0x1013e3fe3f6deb4e61dc023ff69d420dd9ce8f9f"
       }]
     }]
   };
 
   const terms = reader.parseDiscovery(valid);
-  assert.equal(terms.amount, "5");
+  assert.equal(terms.amount, "0.25");
   assert.equal(terms.assetLabel, "USDC");
   assert.equal(terms.billingRule, valid.resources[0].billingRule);
   assert.equal(terms.networkLabel, "Base");

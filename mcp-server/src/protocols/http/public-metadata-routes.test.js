@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
+import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
+import { metricPathLabel } from "./http-helpers.js";
+import { publicOpenApiErrors } from "../../core/public-openapi-contract.js";
 import { buildPlatformCapabilities } from "../../core/discovery-manifest.js";
 import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
@@ -56,6 +60,7 @@ function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const route = createPublicMetadataRoutes({
+    listVerificationProfiles: overrides.listVerificationProfiles,
     authConfig: overrides.authConfig ?? { mode: "strict", chainId: 420420419 },
     buildDiscoveryManifest: (options) => {
       calls.push(["buildDiscoveryManifest", options]);
@@ -189,7 +194,7 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   });
   assert.ok(response.body.endpoints.includes("/status/providers") === false);
   assert.deepEqual(calls, [
-    ["respond", { statusCode: 200, body: response.body, headers: {} }],
+    ["respond", { statusCode: 200, body: response.body, headers: response.headers }],
   ]);
 });
 
@@ -344,7 +349,7 @@ test("onboarding exposes route-not-live idle allocation without soliciting conse
 
 test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirror", async () => {
   const { calls, response, route } = makeHarness();
-  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+  const siteLlms = readFileSync(new URL("../../../../marketing/src/content/llms.txt", import.meta.url), "utf8");
 
   assert.equal(await route({
     request: { method: "GET" },
@@ -380,13 +385,13 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   assert.deepEqual(calls, [["respondText", {
     statusCode: 200,
     body: response.body,
-    headers: { "cache-control": "public, max-age=300" }
+    headers: response.headers
   }]]);
 });
 
 test("Verify leads both llms mirrors with discovery-priced Base payment and public results", async () => {
   const { response, route } = makeHarness();
-  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+  const siteLlms = readFileSync(new URL("../../../../marketing/src/content/llms.txt", import.meta.url), "utf8");
   await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
   const expectedSection = buildVerifyLlmsSection({ apiUrl: "https://api.averray.com" }).trim();
 
@@ -487,4 +492,58 @@ test("GET /strategies returns the retired surface and DepositPool pointers", asy
       headers: { "cache-control": "public, max-age=300" }
     }],
   ]);
+});
+
+test("site signals: pricing projects every registry field, including changed prices", async () => {
+  for (const changed of [false, true]) {
+    const profiles = new VerificationProfileRegistry().list().map((p, i) => changed
+      ? { ...p, price: { ...p.price, amount: String(i + 7), amountRaw: String((i + 7) * 1_000_000) } } : p);
+    const { route, response } = makeHarness({ listVerificationProfiles: () => profiles });
+    assert.equal(await route({ request: { method: "GET" }, response, pathname: "/pricing" }), true);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.body, {
+      verify: profiles.map((p) => ({ profile: p.ref, amount: p.price.amount, asset: p.price.asset,
+        network: p.price.network, billingRule: p.price.billingRule })),
+      page: "https://averray.com/pricing/"
+    });
+  }
+});
+
+test("site signals: robots permits public crawling, and excludes admin", async () => {
+  const { route, response } = makeHarness();
+  assert.equal(await route({ request: { method: "GET" }, response, pathname: "/robots.txt" }), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["content-type"], "text/plain; charset=utf-8");
+  assert.equal(response.body, "User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: https://averray.com/sitemap.xml\n");
+  for (const pathname of ["/robots.txt", "/pricing"]) {
+    assert.equal(await route({ request: { method: "POST" }, response, pathname }), false);
+  }
+});
+
+test("site signals: root, metrics, discovery and OpenAPI retain both public reads", async () => {
+  const { route, response } = makeHarness();
+  await route({ request: { method: "GET" }, response, pathname: "/" });
+  const manifest = buildDiscoveryManifest();
+  const document = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  for (const path of ["/robots.txt", "/pricing"]) {
+    assert.ok(response.body.endpoints.includes(path), `root: ${path}`);
+    assert.equal(metricPathLabel(path), path, `metrics: ${path}`);
+    assert.ok(manifest.publicEndpoints.some((p) => p.method === "GET" && p.path === path), `discovery: ${path}`);
+    assert.ok(document.paths[path]?.get, `OpenAPI: ${path}`);
+    assert.deepEqual(document.paths[path].get.security, []);
+    const removed = structuredClone(document);
+    delete removed.paths[path];
+    assert.ok(publicOpenApiErrors(removed).some((e) => e.includes(path)), `contract guard: ${path}`);
+  }
+  assert.ok(document.paths["/robots.txt"].get.responses["200"].content["text/plain"]);
+  assert.ok(document.paths["/pricing"].get.responses["200"].content["application/json"]);
+});
+
+test("site signals: API llms includes pricing links on the configured host", async () => {
+  const { route, response } = makeHarness({ publicBaseUrl: "https://api.example.test/" });
+  await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
+  for (const required of ["## Pricing", "https://api.example.test/pricing",
+    "https://averray.com/pricing/", "No verdict, no charge. Inconclusive runs are not billed."]) {
+    assert.ok(response.body.includes(required), required);
+  }
 });

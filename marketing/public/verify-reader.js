@@ -27,7 +27,7 @@
     return fraction ? whole + "." + fraction : whole;
   }
 
-  function parseDiscovery(payload) {
+  function parseDiscovery(payload, singleRequirement) {
     if (!isRecord(payload) || payload.x402Version === undefined) {
       throw new Error("x402 discovery document is malformed");
     }
@@ -68,7 +68,13 @@
       networkLabel: network === BASE_NETWORK ? "Base" : network,
       payTo: payTo,
       scheme: scheme,
-      x402Version: String(payload.x402Version)
+      x402Version: String(payload.x402Version),
+      prices: singleRequirement ? [] : resource.accepts.map(function (entry) {
+        var terms = parseDiscovery({ x402Version: payload.x402Version,
+          resources: [Object.assign({}, resource, { accepts: [entry] })] }, true);
+        return { profile: requiredString(entry.extra && entry.extra.profile, "accepted profile"),
+          amount: terms.amount, assetLabel: terms.assetLabel };
+      })
     };
   }
 
@@ -102,7 +108,13 @@
       var terms = parseDiscovery(payload);
 
       inconclusive.textContent = terms.billingRule;
-      root.querySelector("[data-verify-price]").textContent = terms.amount + " " + terms.assetLabel;
+      root.querySelector("[data-verify-price]").textContent = "Price by profile";
+      var prices = root.querySelector("[data-verify-prices]");
+      prices.replaceChildren.apply(prices, terms.prices.map(function (price) {
+        var row = document.createElement("li");
+        row.textContent = price.profile + ": " + price.amount + " " + price.assetLabel;
+        return row;
+      }));
       root.querySelector("[data-verify-protocol]").textContent = terms.scheme + " payment · x402 version " + terms.x402Version;
       root.querySelector("[data-verify-asset-label]").textContent = terms.assetLabel;
       root.querySelector("[data-verify-network]").textContent = terms.networkLabel + " (" + terms.network + ")";

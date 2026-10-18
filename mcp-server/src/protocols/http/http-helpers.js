@@ -3,10 +3,14 @@ import { ValidationError } from "../../core/errors.js";
 export function respond(response, statusCode, payload, extraHeaders = {}, options = {}) {
   rememberArrivalError(response, statusCode, payload);
   const headers = buildResponseHeaders(response, "application/json", extraHeaders);
-  const body = JSON.stringify(payload, exactJsonReplacer, options.compact ? undefined : 2);
+  const body = options.serializedBody ?? serializeJson(payload, options);
   if (body !== undefined && statusCode !== 204 && statusCode !== 304) headers["content-length"] = Buffer.byteLength(body);
   response.writeHead(statusCode, headers);
   response.end(options.headOnly || response._headOnly ? undefined : body);
+}
+
+export function serializeJson(payload, { compact = false } = {}) {
+  return JSON.stringify(payload, exactJsonReplacer, compact ? undefined : 2);
 }
 
 function rememberArrivalError(response, statusCode, payload) {
@@ -156,6 +160,8 @@ export const HTTP_METRIC_PATHS = Object.freeze([
     "/mcp",
     "/agent-tools.json",
     "/openapi.json",
+    "/robots.txt",
+    "/pricing",
     "/.well-known/agent-tools.json",
     "/.well-known/ai-agent.json",
     "/.well-known/agent-card.json",

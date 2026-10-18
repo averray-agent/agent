@@ -1,14 +1,9 @@
 import { AppError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
+import { VERIFY_PROFILE_PRICES, VERIFY_PROFILE_CATALOGUE } from "../core/verification-profile-prices.js";
+export { VERIFY_PROFILE_PRICES } from "../core/verification-profile-prices.js";
 
-export const VERIFY_PROFILE_PRICE = Object.freeze({
-  amount: "5",
-  amountRaw: "5000000",
-  asset: "USDC",
-  decimals: 6,
-  network: "eip155:8453",
-  billingRule: "inconclusive_not_billed"
-});
+const profileIdentity = (name) => VERIFY_PROFILE_CATALOGUE.find((profile) => profile.name === name);
 
 export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
   "target_unreachable",
@@ -17,9 +12,9 @@ export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
   "runner_fault"
 ]);
 
-export const GIT_PATCH_TESTS_PROFILE_REF = "git-patch-tests-v1@1";
-export const MCP_FAILURE_SEMANTICS_PROFILE_REF = "mcp-failure-semantics-v1@1";
-export const STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF = "structured-output-evidence-v1@1";
+export const GIT_PATCH_TESTS_PROFILE_REF = profileIdentity("git-patch-tests-v1").ref;
+export const MCP_FAILURE_SEMANTICS_PROFILE_REF = profileIdentity("mcp-failure-semantics-v1").ref;
+export const STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF = profileIdentity("structured-output-evidence-v1").ref;
 
 export const MCP_FAILURE_SEMANTICS_CHECKS = Object.freeze([
   "auth-boundary",
@@ -66,8 +61,7 @@ const GIT_ARTIFACT_SCHEMA = Object.freeze({
 });
 
 const GIT_PATCH_TESTS_V1 = {
-  name: "git-patch-tests-v1",
-  version: 1,
+  ...profileIdentity("git-patch-tests-v1"),
   handler: "deterministic",
   handlerVersion: 1,
   inputSchema: {
@@ -118,7 +112,7 @@ const GIT_PATCH_TESTS_V1 = {
     temporaryStorageMb: 1024,
     outputLimitBytes: 10 * 1024 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["git-patch-tests-v1"],
   replayFixtureRef: "services/__fixtures__/verifier-replay/deterministic/v1/release-readiness.json",
   status: "published",
   verifierConfig: {
@@ -166,8 +160,7 @@ const GIT_PATCH_TESTS_V1 = {
 };
 
 const MCP_FAILURE_SEMANTICS_V1 = {
-  name: "mcp-failure-semantics-v1",
-  version: 1,
+  ...profileIdentity("mcp-failure-semantics-v1"),
   handler: "deterministic",
   handlerVersion: 1,
   inputSchema: {
@@ -213,7 +206,7 @@ const MCP_FAILURE_SEMANTICS_V1 = {
     temporaryStorageMb: 16,
     outputLimitBytes: 512 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["mcp-failure-semantics-v1"],
   replayFixtureRef: "services/__fixtures__/mcp-failure-semantics-v1-known-good.json",
   status: "published",
   verifierConfig: {
@@ -240,8 +233,7 @@ const MCP_FAILURE_SEMANTICS_V1 = {
 };
 
 const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
-  name: "structured-output-evidence-v1",
-  version: 1,
+  ...profileIdentity("structured-output-evidence-v1"),
   handler: "deterministic",
   handlerVersion: 1,
   inputSchema: {
@@ -296,7 +288,7 @@ const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
     temporaryStorageMb: 32,
     outputLimitBytes: 512 * 1024
   },
-  price: VERIFY_PROFILE_PRICE,
+  price: VERIFY_PROFILE_PRICES["structured-output-evidence-v1"],
   replayFixtureRef: "services/__fixtures__/structured-output-evidence-v1-known-good.json",
   status: "published",
   verifierConfig: {

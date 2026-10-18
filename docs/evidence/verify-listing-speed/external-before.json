@@ -1,0 +1,444 @@
+{
+  "measured_at": "2026-10-16T20:41:00.928865+00:00",
+  "base_sha": "ce811b58",
+  "method": "20 sequential curl processes per path; fresh connections; total latency; nearest-rank percentiles; no warmup",
+  "origin": "https://api.averray.com",
+  "rows": [
+    {
+      "path": "/",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 93.406,
+      "p95_ms": 98.334,
+      "samples": [
+        {
+          "status": 200,
+          "ttfb_ms": 93.464,
+          "total_ms": 96.167
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 92.457,
+          "total_ms": 96.781
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 95.186,
+          "total_ms": 95.544
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 83.769,
+          "total_ms": 84.086
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 105.292,
+          "total_ms": 105.444
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.187,
+          "total_ms": 93.406
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.981,
+          "total_ms": 95.607
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 95.462,
+          "total_ms": 97.578
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 91.771,
+          "total_ms": 91.972
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 80.102,
+          "total_ms": 80.242
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 94.702,
+          "total_ms": 94.986
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 85.986,
+          "total_ms": 86.135
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.068,
+          "total_ms": 93.275
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 89.706,
+          "total_ms": 89.955
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 87.324,
+          "total_ms": 87.489
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 85.964,
+          "total_ms": 86.094
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 97.677,
+          "total_ms": 98.334
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 92.336,
+          "total_ms": 92.542
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.275,
+          "total_ms": 93.408
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 96.411,
+          "total_ms": 96.651
+        }
+      ]
+    },
+    {
+      "path": "/verify/runs",
+      "method": "POST",
+      "n": 20,
+      "p50_ms": 98.513,
+      "p95_ms": 127.804,
+      "samples": [
+        {
+          "status": 402,
+          "ttfb_ms": 102.71,
+          "total_ms": 102.957
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 94.314,
+          "total_ms": 94.799
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 91.052,
+          "total_ms": 91.199
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 90.934,
+          "total_ms": 91.101
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 93.114,
+          "total_ms": 93.443
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 79.624,
+          "total_ms": 79.808
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 98.828,
+          "total_ms": 99.037
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 102.259,
+          "total_ms": 102.461
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 98.394,
+          "total_ms": 98.513
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 101.685,
+          "total_ms": 101.848
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 117.039,
+          "total_ms": 124.45
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 88.736,
+          "total_ms": 89.3
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 94.784,
+          "total_ms": 95.021
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 90.499,
+          "total_ms": 90.692
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 108.495,
+          "total_ms": 110.333
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 127.582,
+          "total_ms": 127.804
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 125.249,
+          "total_ms": 128.136
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 112.363,
+          "total_ms": 112.512
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 102.218,
+          "total_ms": 102.369
+        },
+        {
+          "status": 402,
+          "ttfb_ms": 85.623,
+          "total_ms": 85.838
+        }
+      ]
+    },
+    {
+      "path": "/openapi.json",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 158.015,
+      "p95_ms": 220.426,
+      "samples": [
+        {
+          "status": 200,
+          "ttfb_ms": 108.49,
+          "total_ms": 193.426
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.96,
+          "total_ms": 154.955
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 90.659,
+          "total_ms": 153.493
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 102.402,
+          "total_ms": 177.218
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 81.157,
+          "total_ms": 159.749
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 94.967,
+          "total_ms": 160.51
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 83.487,
+          "total_ms": 146.208
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 95.41,
+          "total_ms": 165.706
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 90.008,
+          "total_ms": 156.158
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 85.696,
+          "total_ms": 299.158
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 75.315,
+          "total_ms": 147.392
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 87.419,
+          "total_ms": 144.296
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 79.626,
+          "total_ms": 154.695
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 95.864,
+          "total_ms": 164.332
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 92.993,
+          "total_ms": 152.538
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 142.286,
+          "total_ms": 220.426
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 89.938,
+          "total_ms": 170.541
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 89.261,
+          "total_ms": 159.588
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 86.142,
+          "total_ms": 147.02
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 92.108,
+          "total_ms": 158.015
+        }
+      ]
+    },
+    {
+      "path": "/llms.txt",
+      "method": "GET",
+      "n": 20,
+      "p50_ms": 88.825,
+      "p95_ms": 98.606,
+      "samples": [
+        {
+          "status": 200,
+          "ttfb_ms": 87.967,
+          "total_ms": 88.16
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 88.575,
+          "total_ms": 88.717
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 86.893,
+          "total_ms": 87.073
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 98.419,
+          "total_ms": 98.606
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 85.996,
+          "total_ms": 86.283
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 89.806,
+          "total_ms": 90.054
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 82.702,
+          "total_ms": 82.922
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 88.9,
+          "total_ms": 89.053
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 105.993,
+          "total_ms": 106.454
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 92.431,
+          "total_ms": 94.434
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 93.165,
+          "total_ms": 93.587
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 97.643,
+          "total_ms": 98.035
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 88.051,
+          "total_ms": 88.825
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 87.51,
+          "total_ms": 87.845
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 80.261,
+          "total_ms": 80.476
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 96.477,
+          "total_ms": 96.667
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 96.404,
+          "total_ms": 97.149
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 84.326,
+          "total_ms": 84.641
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 97.583,
+          "total_ms": 97.813
+        },
+        {
+          "status": 200,
+          "ttfb_ms": 81.215,
+          "total_ms": 81.434
+        }
+      ]
+    }
+  ]
+}

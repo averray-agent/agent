@@ -1,0 +1,98 @@
+[
+  {
+    "mutant": "startup-warm-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-read-per-request",
+    "red": true
+  },
+  {
+    "mutant": "bootstrap-not-awaited",
+    "red": true
+  },
+  {
+    "mutant": "static-build-per-request",
+    "red": true
+  },
+  {
+    "mutant": "json-serialize-per-request",
+    "red": true
+  },
+  {
+    "mutant": "etag-wrong",
+    "red": true
+  },
+  {
+    "mutant": "conditional-get-removed",
+    "red": true
+  },
+  {
+    "mutant": "cache-control-drift",
+    "red": true
+  },
+  {
+    "mutant": "304-content-length-retained",
+    "red": true
+  },
+  {
+    "mutant": "head-body-emitted",
+    "red": true
+  },
+  {
+    "mutant": "domain-transient-discard-gate",
+    "red": true
+  },
+  {
+    "mutant": "domain-background-retry-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-lazy-retry-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-rejected-promise-retained",
+    "red": true
+  },
+  {
+    "mutant": "domain-mismatch-retries",
+    "red": true
+  },
+  {
+    "mutant": "domain-wrong-402",
+    "red": true
+  },
+  {
+    "mutant": "domain-backoff-unbounded",
+    "red": true
+  },
+  {
+    "mutant": "domain-timeout-unbounded",
+    "red": true
+  },
+  {
+    "mutant": "domain-health-warning-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-discovery-healthy-empty",
+    "red": true
+  },
+  {
+    "mutant": "static-root-generated-at",
+    "red": true
+  },
+  {
+    "mutant": "domain-chain-check-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-name-check-removed",
+    "red": true
+  },
+  {
+    "mutant": "domain-separator-check-removed",
+    "red": true
+  }
+]

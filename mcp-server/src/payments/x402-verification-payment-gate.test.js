@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { TypedDataEncoder, Wallet } from "ethers";
+import { VerificationProfileRegistry } from "../services/verification-profile-registry.js";
 
 import {
   X402VerificationPaymentGate,
@@ -87,7 +88,7 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
   };
   const gate = new X402VerificationPaymentGate({
     config: config(),
-    provider: { async getNetwork() { return { chainId: 8453n }; }, async getBlockNumber() { return 100; } },
+    provider: { async send(method) { assert.equal(method, "eth_chainId"); return "0x2105"; }, async getBlockNumber() { return 100; } },
     tokenContract,
     captureTokenContract,
     now: () => NOW
@@ -97,7 +98,10 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
 
 async function signedPayment(gate, {
   wallet = Wallet.createRandom(),
-  value = PRICE.amountRaw,
+  price = PRICE,
+  profile = PROFILE,
+  profileLimits = PROFILE_LIMITS,
+  value = price.amountRaw,
   validAfter = NOW_SECONDS - 1n,
   validBefore = NOW_SECONDS + 721n,
   signingName = "USD Coin",
@@ -106,9 +110,9 @@ async function signedPayment(gate, {
   const liveDomain = await gate.eip712Domain();
   const requirements = gate.paymentRequirements({
     domain: liveDomain,
-    price: PRICE,
-    profile: PROFILE,
-    profileLimits: PROFILE_LIMITS,
+    price,
+    profile,
+    profileLimits,
     requestHash: REQUEST_HASH
   });
   const authorization = {
@@ -130,12 +134,12 @@ async function signedPayment(gate, {
   };
 }
 
-async function authorize(gate, paymentProof) {
+async function authorize(gate, paymentProof, { price = PRICE, profile = PROFILE, profileLimits = PROFILE_LIMITS } = {}) {
   return gate.authorize({
     paymentProof,
-    price: PRICE,
-    profile: PROFILE,
-    profileLimits: PROFILE_LIMITS,
+    price,
+    profile,
+    profileLimits,
     requestHash: REQUEST_HASH
   });
 }
@@ -287,12 +291,14 @@ test("X1d admission block read failure is an actionable 503 payment refusal", as
   assert.equal(calls.capture, 0);
 });
 
-test("malformed authorization integers are actionable 402 refusals and transient domain reads retry", async () => {
+test("malformed authorization integers are actionable 402 refusals and transient domain reads retry", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
   const transient = harness({ domainFailures: 1 });
   await assert.rejects(
     () => transient.gate.eip712Domain(),
-    (error) => error.statusCode === 402 && error.code === "payment_domain_unavailable"
+    (error) => error.statusCode === 503 && error.code === "payment_domain_unavailable"
   );
+  t.mock.timers.tick(1_000);
   assert.equal((await transient.gate.eip712Domain()).name, "USD Coin");
 
   const { gate } = harness();
@@ -306,10 +312,10 @@ test("malformed authorization integers are actionable 402 refusals and transient
   );
 });
 
-test("Verify payment config fails closed to the unavailable gate when Base settings are absent", () => {
+test("Verify payment config fails closed to the unavailable gate when Base settings are absent", async () => {
   assert.deepEqual(resolveX402VerificationPaymentConfig({}), { enabled: false, mode: "disabled" });
   const warnings = [];
-  const gate = createConfiguredX402VerificationPaymentGate(
+  const gate = await createConfiguredX402VerificationPaymentGate(
     { X402_VERIFY_MODE: "enabled" },
     { logger: { warn: (...args) => warnings.push(args) } }
   );
@@ -317,9 +323,9 @@ test("Verify payment config fails closed to the unavailable gate when Base setti
   assert.equal(warnings.length, 1);
 });
 
-test("configured factory wires the Base gate without importing the Hub gateway or settlement adapter", () => {
+test("configured factory wires the Base gate without importing the Hub gateway or settlement adapter", async () => {
   const { gate: fixture } = harness();
-  const configured = createConfiguredX402VerificationPaymentGate({
+  const configured = await createConfiguredX402VerificationPaymentGate({
     X402_VERIFY_MODE: "enabled",
     X402_PAYMENT_NETWORK: "eip155:8453",
     BASE_RPC_URL: "https://base.example.test",
@@ -342,4 +348,17 @@ test("configured factory wires the Base gate without importing the Hub gateway o
 function assertDomainReadsName(source) {
   assert.match(source, /this\.token\.name\(\)/u, "payment domain must read the token name()");
   assert.doesNotMatch(source, /this\.token\.symbol\(\)/u, "payment domain must never read symbol()");
+}
+
+for (const profile of new VerificationProfileRegistry().list()) {
+  test(`pricing: ${profile.ref} capture submits its exact authorized amount`, async () => {
+    const args = { price: profile.price, profile: profile.ref, profileLimits: profile.limits };
+    const { gate, calls } = harness({ balance: BigInt(profile.price.amountRaw) });
+    const { paymentProof } = await signedPayment(gate, args);
+    const authorization = await authorize(gate, paymentProof, args);
+    assert.equal(authorization.amountRaw, profile.price.amountRaw);
+    await gate.capture({ authorization });
+    assert.equal(calls.capture, 1);
+    assert.equal(calls.captureArgs[2], BigInt(profile.price.amountRaw));
+  });
 }

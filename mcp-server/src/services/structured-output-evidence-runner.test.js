@@ -11,7 +11,7 @@ import {
 } from "./structured-output-evidence-runner.js";
 import {
   STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF,
-  VERIFY_PROFILE_PRICE,
+  VERIFY_PROFILE_PRICES,
   VerificationProfileRegistry
 } from "./verification-profile-registry.js";
 import { VerificationRunService } from "./verification-run-service.js";
@@ -31,7 +31,7 @@ test("profile 3 is published at the shared price with the pinned contains-all co
   assert.equal(profile.ref, STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF);
   assert.equal(profile.status, "published");
   assert.equal(profile.handler, "deterministic");
-  assert.deepEqual(profile.price, VERIFY_PROFILE_PRICE);
+  assert.deepEqual(profile.price, VERIFY_PROFILE_PRICES["structured-output-evidence-v1"]);
   assert.equal(profile.successCriteria.statement, SUCCESS_STATEMENT);
   assert.deepEqual(profile.successCriteria.requiredEvidence, fixture.expected.evidenceOutputs);
   assert.deepEqual(profile.verifierConfig.expectedOutputs, fixture.expected.evidenceOutputs);
@@ -128,9 +128,9 @@ test("red-then-green: changed source bytes without sha is inconclusive, never ca
         return {
           id: "structured-payment-authorization",
           customer: "0x1111111111111111111111111111111111111111",
-          amountRaw: VERIFY_PROFILE_PRICE.amountRaw,
-          asset: VERIFY_PROFILE_PRICE.asset,
-          network: VERIFY_PROFILE_PRICE.network
+          amountRaw: VERIFY_PROFILE_PRICES["structured-output-evidence-v1"].amountRaw,
+          asset: VERIFY_PROFILE_PRICES["structured-output-evidence-v1"].asset,
+          network: VERIFY_PROFILE_PRICES["structured-output-evidence-v1"].network
         };
       },
       async capture() { calls.capture += 1; },

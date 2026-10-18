@@ -1,0 +1,12 @@
+# CI-only base substitution. The workflow creates this digest-pinned local
+# alias with pull-ci-image.sh before Compose builds either service.
+# Production Dockerfiles and the base smoke stack remain unchanged.
+services:
+  mcp-egress-proxy:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim
+  mcp-prober:
+    build:
+      additional_contexts:
+        public.ecr.aws/docker/library/node:22-bookworm-slim: docker-image://averray-ci/node:22-bookworm-slim

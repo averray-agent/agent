@@ -139,7 +139,7 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
     inputs: run.inputs
   });
   const billed = run?.billing?.status === "captured";
-  const price = profile.price ?? {};
+  const price = billed ? run.billing : profile.price ?? {};
   const valueAtRisk = billed
     ? { asset: price.asset, amount: String(price.amount), amountRaw: String(price.amountRaw) }
     : { asset: price.asset, amount: "0", amountRaw: "0" };
@@ -162,14 +162,14 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
       handler: profile.handler,
       handlerVersion: Number(profile.handlerVersion)
     },
-    verdict: {
+    verdict: compact({
       outcome,
       reasonCode,
       reason: firstString(verdict?.reason),
       evidenceHash: bytes32(verdict?.evidenceHash)
         ?? hashCanonicalContent(verdict?.evidence ?? execution?.report ?? null),
       workerConsequence: "none"
-    },
+    }),
     intent: {
       specHash,
       specSource: "verify_request",

@@ -1,0 +1,541 @@
+{
+  "measured_at": "2026-10-16T20:56:23.619Z",
+  "revision": "ce811b58916b27b024e05fe1fa8ad3e7a26564cd",
+  "working_tree_dirty": true,
+  "method": "20 sequential real HTTP requests per path; per-request delta of existing http_request_duration_ms_sum; integer ms; local memory store and deterministic loopback Base RPC; no warmup; nearest-rank percentiles",
+  "startupRpcCalls": 3,
+  "rows": [
+    {
+      "path": "/",
+      "method": "GET",
+      "metricPath": "/",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 0,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.195791999999983,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.6146669999998267,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.4267500000000837,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.025624999999991,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.3546249999999418,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.3937499999999545,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2786670000000413,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.36620799999991505,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.33024999999997817,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.28866599999992104,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.33395900000004985,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2738329999999678,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.35149999999998727,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.36745799999994233,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.28424999999992906,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2861249999998563,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.3525419999998576,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.27937500000007276,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.32683300000007875,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.28154099999983373,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/verify/runs",
+      "method": "POST",
+      "metricPath": "other",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 1,
+      "samples": [
+        {
+          "status": 402,
+          "internal_ms": 1,
+          "total_ms": 3.416958999999906,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.0864170000002105,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.173917000000074,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.0462089999998625,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.0107499999999163,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.8127919999999449,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.8509169999999813,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.8656670000000304,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 1.4695420000000468,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.8567920000000413,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.7553329999998368,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.6737499999999272,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.9275000000000091,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.7239160000001448,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.7041249999999764,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.6679169999999885,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.782207999999855,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.6888330000001588,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.6253750000000764,
+          "rpcCalls": 0
+        },
+        {
+          "status": 402,
+          "internal_ms": 0,
+          "total_ms": 0.8439999999998236,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/openapi.json",
+      "method": "GET",
+      "metricPath": "/openapi.json",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 2,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 2,
+          "total_ms": 3.4506249999999454,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.1429579999999078,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0385420000000067,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.055208999999877,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.070084000000179,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0088330000000951,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.056041999999934,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0512499999999818,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.003582999999935,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0372079999999642,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.12824999999998,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.9550419999998212,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.098540999999841,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.9950839999999062,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.9891669999999522,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0672089999998207,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0237079999999423,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.040707999999995,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.1082920000001195,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.0642499999999018,
+          "rpcCalls": 0
+        }
+      ]
+    },
+    {
+      "path": "/llms.txt",
+      "method": "GET",
+      "metricPath": "/llms.txt",
+      "n": 20,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 0,
+      "samples": [
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.5565420000000358,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2805000000000746,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.24137500000006185,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.28262500000005275,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.44308299999988776,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.23537499999997635,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.25241700000015044,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2925840000000335,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2604590000000826,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2567910000000211,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.24862499999994725,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.23770899999999529,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2507499999999254,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 1.2757919999999103,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.30654200000003584,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.2804160000000593,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.24008299999991323,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.21079200000008314,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.24441700000011224,
+          "rpcCalls": 0
+        },
+        {
+          "status": 200,
+          "internal_ms": 0,
+          "total_ms": 0.25808299999994233,
+          "rpcCalls": 0
+        }
+      ]
+    }
+  ],
+  "source_sha256": {
+    "mcp-server/src/payments/x402-verification-payment-gate.js": "e5f5b0e4fb8f006dab5ee217dcbeceabadce9dae5786eb63a50f6eed6dba4e00",
+    "mcp-server/src/services/bootstrap.js": "19068af32243a7cfd7cb7053471972cae4144b050990ef8ea7bbf62bfb58fac5",
+    "mcp-server/src/protocols/http/public-metadata-routes.js": "5f957b51621891b4a56519918eaf80edc827e0b38c9a5383630308679f3bbdf9",
+    "mcp-server/src/protocols/http/http-helpers.js": "3cae0f8ce3a2b575f864ba4b93ed04150cfd3f998b6a322e74674684043d3dc5",
+    "docs/api/openapi.json": "10ff2d727b88044829dd585ff4484669be3193f1c4c6a50dfeda0939edb7b8c7",
+    "mcp-server/src/protocols/http/static-metadata.js": "ae808a90b3bb29a4f635f43ca5bbd9246f5be9591fe279d91785d57bf4c17631"
+  }
+}

@@ -75,6 +75,7 @@ export function createOperationalRoutes({
   getRewardBankHealth,
   getProcessWarnings = () => [],
   verificationRunService,
+  verificationPaymentGate,
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,
@@ -176,6 +177,7 @@ export function createOperationalRoutes({
       serviceHealth.components.credentials = credentials;
       const productHealth = await getProductHealthSnapshot();
       const warnings = [
+        ...(verificationPaymentGate?.getDomainWarnings?.() ?? []),
         ...buildCapabilityWarnings(capabilityHealth),
         ...buildOnboardingInventoryWarnings(productHealth.onboarding),
         ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
@@ -198,7 +200,7 @@ export function createOperationalRoutes({
       }).catch(() => undefined);
 
       respond(response, serviceHealth.ok ? 200 : 503, {
-        status: serviceHealth.ok && !warnings.some((warning) => warning.code === "github_pr_review_overdue") ? "ok" : "degraded",
+        status: serviceHealth.ok && !warnings.some((warning) => ["github_pr_review_overdue", "verify_payment_domain_unavailable"].includes(warning.code)) ? "ok" : "degraded",
         deployedSha,
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
         serviceHealth,
