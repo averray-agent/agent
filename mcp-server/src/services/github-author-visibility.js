@@ -3,6 +3,7 @@ import { approvedSettlement } from "../core/retained-workers.js";
 import { createSelfIdentityRegistry } from "../core/self-identity-registry.js";
 import {
   githubPersonFromLookups,
+  isGithubBot,
   loadGithubClaimGuardrailConfig,
   normalizeClaimWallet,
   readGithubIssueClaim,
@@ -19,6 +20,8 @@ const openStatuses = new Set(["claimed", "submitted", "rejected", "disputed"]);
 // Historical records without this evidence stay unattributed; wallets are not authors.
 export function boundGithubAuthor(lookup) {
   const login = lookup?.author?.login;
+  // A Bot account, including Copilot, is not a public author and does not feed concentration.
+  if (isGithubBot(lookup?.author)) return null;
   return lookup?.status === "verified" && lookup.claimantBinding?.status === "matched"
     && (lookup.claimantBinding.walletMatches === true || lookup.claimantBinding.sessionMatches === true)
     && typeof login === "string" && /^[a-z\d](?:[a-z\d-]{0,38})$/iu.test(login)

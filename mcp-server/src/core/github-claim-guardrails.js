@@ -317,7 +317,7 @@ export function decideGithubPrSelfMerge({ lookup, wallet, links = new Map(), lin
   // A workflow bot merging with the repository's GITHUB_TOKEN is not a maintainer
   // decision. Count it and do not auto-settle. Log mode still settles.
   if (isGithubBot(lookup?.mergedBy)) {
-    return { action: "ambiguous", reason: "bot_merger", blocksAutoSettle: true };
+    return { action: "hold", reason: GITHUB_PR_SELF_MERGE_REASON, basis: "bot_merger" };
   }
   const authorId = isGithubBot(lookup?.author) ? null : positiveGithubUserId(lookup?.author?.id);
   const mergedById = positiveGithubUserId(lookup?.mergedBy?.id);

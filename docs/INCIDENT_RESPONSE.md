@@ -660,6 +660,19 @@ It never blocks claims or changes payment. The public warning exposes only
 `code`, `severity`, `openClaims`, `totalOpenClaims`, and `distinctWallets`;
 author identities are available only on the authenticated operator surface.
 Unknown author evidence remains unattributed, not inferred from wallet count.
+A Bot author, including Copilot, is not a public author and is left out of
+`distinctAuthors` and this concentration warning.
+
+The reference-agent capabilities probe treats a `/health` warning outside
+`PRODUCT_HEALTH_EXPECTED_WARNINGS` as amber. `github_repo_claim_burst` and
+`github_lane_claim_burst` remain on `/health` only while a claim in the burst
+is inside `GITHUB_CLAIM_BURST_LOOKBACK_HOURS` (default 24). A burst therefore
+keeps that probe amber for up to 24 hours after its last claim.
+`github_pr_self_merge_hold_overdue` stays on `/health` until an operator
+releases the hold through `POST /admin/verifier/run` or `POST /verifier/run`,
+so the probe stays amber until that release. The overdue age starts when the
+hold is recorded, not when the session was submitted.
+`same_author_multi_wallet` is admin-only and does not amber the probe.
 
 Run these locally on the operator Mac with the existing mainnet KMS JWT
 environment and AWS signing credentials loaded securely. Required:

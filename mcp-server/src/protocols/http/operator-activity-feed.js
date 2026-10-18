@@ -191,6 +191,16 @@ export async function listAlerts({
         ctaLabel: "Open runs ->", ctaHref: "/runs" });
       continue;
     }
+    if (warning.code === "github_pr_self_merge_hold_overdue") {
+      const hours = Number.isFinite(warning.oldestAgeMs) ? Math.floor(warning.oldestAgeMs / 3_600_000) : null;
+      const count = Number.isFinite(warning.count) ? warning.count : 0;
+      alerts.push({ id: warning.code, code: warning.code, severity: "warning", tone: "warn",
+        title: "Self-merge payout hold awaiting operator",
+        ref: review.selfMergeHoldSessionIds?.[0] ?? null,
+        body: `${count} self-merge payout ${count === 1 ? "hold is" : "holds are"} past the review SLA${hours == null ? "" : `; oldest ${hours} hours`}. An operator releases the hold from the verifier run route.`,
+        ctaLabel: "Open runs ->", ctaHref: "/runs" });
+      continue;
+    }
     alerts.push({ id: warning.code, code: warning.code, severity: "warning", tone: "warn",
       title: "GitHub PR review overdue", ref: warning.sessionId,
       body: `${review.githubPrCount} pending GitHub PR reviews; oldest ${Math.floor(warning.oldestAgeMs / 3_600_000)} hours. Operator review required.`,

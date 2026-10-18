@@ -60,6 +60,24 @@ test("settled windows and USDC totals use receipt evidence, not rewards; merged 
   assert.equal(result.authors[0].usdcPaid.missingPayoutEvidence, 1);
 });
 
+test("bot authors are excluded from distinct author and concentration counts", async () => {
+  const store = new MemoryStateStore();
+  for (let id = 1; id <= 3; id++) {
+    await add(store, id, "Copilot");
+    await store.upsertMutationReceipt("github_pr_author", String(id), {
+      githubLookup: lookup("Copilot", { author: { id: 999, login: "Copilot", type: "Bot" } }),
+      previewOutcome: "approved"
+    });
+  }
+  await add(store, 4, "human");
+  const result = await readGithubAuthors(store, { now });
+  assert.equal(result.distinctAuthors, 1);
+  assert.equal(result.authors[0].author, "human");
+  assert.equal(result.warnings.some((warning) => warning.code === "github_author_concentration"), false);
+  assert.equal(JSON.stringify(result.warnings).includes("Copilot"), false);
+  assert.equal(JSON.stringify(result.warnings).includes("999"), false);
+});
+
 test("concentration needs at least three open claims and does not leak an author", async () => {
   const store = new MemoryStateStore();
   for (let id = 1; id <= 3; id++) {

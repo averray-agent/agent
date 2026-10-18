@@ -424,10 +424,12 @@ test("self-merge holds only on API ids, and log mode is the default", () => {
     wallet: wallet(1),
     links: new Map()
   }).action, "allow");
-  assert.equal(decideGithubPrSelfMerge({
+  const botMerger = decideGithubPrSelfMerge({
     lookup: { author: { id: 1 }, mergedBy: { id: 2, type: "Bot" }, repoOwner: { id: 1 } },
     wallet: wallet(1)
-  }).blocksAutoSettle, true);
+  });
+  assert.equal(botMerger.action, "hold");
+  assert.equal(botMerger.basis, "bot_merger");
   assert.equal(decideGithubPrSelfMerge({
     lookup: { author: { id: 1, type: "Bot" }, mergedBy: { id: 2 }, repoOwner: { id: 3 } },
     wallet: wallet(1),
