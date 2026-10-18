@@ -133,6 +133,10 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
     ["credit:originate"]
   );
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs/ingest/wikipedia"), ["jobs:ingest"]);
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/admin/maintainer-repos/424242/cooldown/clear"),
+    ["jobs:lifecycle"]
+  );
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/deposit/transactions"), ["account:read"]);

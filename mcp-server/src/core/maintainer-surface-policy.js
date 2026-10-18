@@ -131,18 +131,23 @@ export async function evaluateMaintainerSurfaceForIssue(issue, {
   }
 
   const issuePolicy = scanPolicyText(`${issue?.title ?? ""}\n${issue?.body ?? ""}`);
-  if (!issuePolicy.allowed) {
+  const issueStop = !issuePolicy.allowed && issuePolicy.reason === "maintainer_stop_signal"
+    ? { allowed: false, repo, reason: issuePolicy.reason, issueBodyHit: true }
+    : null;
+  if (!issuePolicy.allowed && !issueStop) {
     return { allowed: false, repo, reason: issuePolicy.reason, issueBodyHit: true };
   }
 
   if (scanRepoPolicies) {
     const scan = await scanGithubRepoPolicyFiles({ repo, githubToken, fetchImpl });
     if (!scan.allowed) {
-      return { allowed: false, repo, reason: scan.reason, policyScan: scan };
+      return { allowed: false, repo, reason: scan.reason, policyScan: scan, ...(issueStop ? { issueBodyHit: true } : {}) };
     }
+    if (issueStop) return { ...issueStop, policyScan: scan };
     return { allowed: true, repo, policyScan: scan };
   }
 
+  if (issueStop) return issueStop;
   return { allowed: true, repo };
 }
 

@@ -174,6 +174,9 @@ test("ingestGithubIssues stores one resolved GitHub repository id for a renamed-
           }
         };
       }
+      if (String(url).includes("/comments")) {
+        return { ok: true, async json() { return []; } };
+      }
       assert.equal(String(url), "https://api.github.com/repos/example/project");
       return {
         ok: true,
@@ -224,6 +227,83 @@ test("ingestGithubIssues uses an embedded repository id and omits it when lookup
   assert.equal(failed.jobs[0].source.githubRepoId, undefined);
 });
 
+test("fetched stop comments do not replace the search comment count used for scoring", async () => {
+  const body = "The parser currently accepts an invalid edge case. Add a regression test and improve the validation error so the message stays specific.";
+  const crowded = { ...GOOD_ISSUE, body, comments: 40 };
+  const quiet = { ...crowded, comments: 2 };
+  assert.equal(scoreIssue(crowded), scoreIssue(quiet) - 10);
+  const calls = [];
+  const logs = [];
+  const payload = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    logger: { warn(payload, message) { logs.push({ payload, message }); }, info() {} },
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [crowded] }; } };
+      }
+      if (String(url).includes("/comments")) {
+        return {
+          ok: true,
+          async json() {
+            return Array.from({ length: 20 }, (_, index) => ({
+              id: index + 1,
+              author_association: "NONE",
+              body: "thanks"
+            }));
+          }
+        };
+      }
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.equal(payload.jobs.length, 1);
+  assert.equal(payload.jobs[0].source.comments, 40);
+  assert.equal(payload.jobs[0].source.score, scoreIssue(crowded));
+  assert.equal(Number.isNaN(payload.jobs[0].source.comments), false);
+  const commentUrl = calls.find((url) => url.includes("/comments"));
+  assert.equal(new URL(commentUrl).searchParams.get("page"), "2");
+  assert.equal(new URL(commentUrl).searchParams.has("sort"), false);
+  assert.equal(new URL(commentUrl).searchParams.has("direction"), false);
+  assert.match(commentUrl, /per_page=20/);
+  assert.equal(logs.length, 0);
+
+  const skipped = [];
+  await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    fetchImpl: async (url) => {
+      if (String(url).includes("/comments")) skipped.push(String(url));
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [{ ...crowded, comments: 0 }] }; } };
+      }
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.deepEqual(skipped, []);
+
+  const failed = [];
+  await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 1,
+    logger: { warn(payload, message) { failed.push({ payload, message }); } },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [crowded] }; } };
+      }
+      if (String(url).includes("/comments")) throw new Error("comment read down");
+      return { ok: false, status: 404, async json() { return {}; } };
+    }
+  });
+  assert.equal(failed[0].payload.event, "maintainer_stop_comment_fetch_failed");
+  assert.equal(failed[0].payload.issueNumber, 42);
+  assert.equal(JSON.stringify(failed).includes("comment read down"), false);
+});
+
 test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests", async () => {
   const payload = await ingestGithubIssues({
     query: "is:issue is:open label:good-first-issue",
@@ -247,3 +327,47 @@ test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests",
   assert.equal(payload.jobs[0].source.issueNumber, 42);
   assert.equal(payload.jobs[0].verification.method, "github_pr");
 });
+
+
+for (const [count, stopId, expectedPages, detects] of [
+  [45, 45, [3, 2], true], // MEMBER stop on the last page must be seen.
+  [45, 26, [3, 2], true], // Tail of the previous page fills the newest 20.
+  [45, 25, [3, 2], false], // Older comments outside that bound are excluded.
+  [40, 40, [2], true], // A full last page needs no preceding-page request.
+  [5, 5, [1], true] // Never request page zero.
+]) {
+  test(`comment pagination reads the newest window: count=${count}, stop=${stopId}`, async () => {
+    const issue = { ...GOOD_ISSUE, comments: count, repository: { id: 77, full_name: "example/project" } };
+    const pages = [];
+    const payload = await ingestGithubIssues({
+      query: "is:issue is:open label:good-first-issue", limit: 5, minScore: 1,
+      fetchImpl: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/search/issues") return { ok: true, json: async () => ({ items: [issue] }) };
+        if (parsed.pathname === "/repos/example/project/issues/42/comments") {
+          assert.equal(parsed.searchParams.get("per_page"), "20");
+          assert.equal(parsed.searchParams.has("sort"), false);
+          assert.equal(parsed.searchParams.has("direction"), false);
+          const page = Number(parsed.searchParams.get("page"));
+          pages.push(page);
+          const all = Array.from({ length: count }, (_, index) => ({ id: index + 1,
+            author_association: index + 1 === stopId ? "MEMBER" : "NONE",
+            body: index + 1 === stopId ? "Please stop sending AI-generated pull requests." : "thanks"
+          }));
+          return { ok: true, json: async () => all.slice((page - 1) * 20, page * 20) };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+    });
+    assert.deepEqual(pages, expectedPages);
+    assert.equal(payload.jobs.length, detects ? 0 : 1);
+    if (detects) {
+      assert.equal(payload.skippedDetails[0].reason, "maintainer_stop_signal");
+      assert.deepEqual(payload.skippedDetails[0].stopSources, [`comment:${stopId}`]);
+      assert.equal(payload.skippedDetails[0].escalates, true);
+    } else {
+      assert.equal(payload.jobs[0].source.comments, count);
+      assert.equal(payload.jobs[0].source.score, scoreIssue(issue));
+    }
+  });
+}
