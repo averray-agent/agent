@@ -193,6 +193,7 @@ test("Redis and Caddy CI steps pull one digest from two registries via the bound
 });
 
 test("real-Redis proof stays mandatory: no skip path and fail-closed readiness", () => {
+  assert.equal(ci.jobs.backend["continue-on-error"], undefined);
   const step = steps.find((s) => s.name === "Verify authorization reservation against real Redis");
   assert.ok(step);
   assert.equal(step["continue-on-error"], undefined);
@@ -345,5 +346,59 @@ test("CI pull helper refuses bad aliases, Docker Hub, tags, and mixed digests be
     const result = await pullFixture("success", args);
     assert.equal(result.status, 2, `${args.join(" ")}\n${result.stderr}`);
     assert.deepEqual(result.calls, []);
+  }
+});
+
+
+test("real-Redis node test failure fails the workflow step, including its cleanup trap", async () => {
+  const step = ci.jobs.backend.steps.find((s) => s.name === "Verify authorization reservation against real Redis");
+  const dir = await mkdtemp(join(tmpdir(), "ci-redis-failure-"));
+  try {
+    const envFile = join(dir, "functions.sh"), log = join(dir, "node-calls");
+    await writeFile(envFile, `
+# Only external commands are fixtures; execute the workflow's actual shell.
+bash() { return 0; }
+docker() { [[ "$1" != run ]] || printf 'redis-fixture'; return 0; }
+sleep() { return 0; }
+node() {
+  printf '%s\\n' "$VERIFY_RESERVATION_TEST_REDIS_URL $*" >> "$CALL_LOG"
+  return 42
+}
+`);
+    const result = spawnSync("bash", ["-c", step.run], {
+      cwd: root, encoding: "utf8", timeout: 5000,
+      env: { ...process.env, BASH_ENV: envFile, CALL_LOG: log }
+    });
+    assert.equal(result.status, 42, `Redis test failure was swallowed: ${result.stderr}`);
+    assert.equal((await readFile(log, "utf8")).trim(),
+      "redis://127.0.0.1:16381 --test mcp-server/src/services/verify-authorization-reservation.test.js mcp-server/src/services/verify-receipt-signing.test.js mcp-server/src/services/github-repository-identity-backfill.test.js");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("backend job has a bounded deadline even if registry pulls hang", () => {
+  assert.equal(ci.jobs.backend["timeout-minutes"], 30);
+});
+
+test("MCP smoke builds both Node bases from the pre-pulled CI alias", async () => {
+  const step = steps.find((s) => s.name === "Verify real MCP good, bad, and egress-deny fixtures inside prober images");
+  assert.ok(step);
+  assert.equal(step.if, undefined);
+  assert.equal(step["continue-on-error"], undefined);
+  const script = joinLines(step.run);
+  assert.match(script, /set -euo pipefail/u);
+  const alias = "averray-ci/node:22-bookworm-slim";
+  const fixture = steps.find((s) => s.name === "Verify real fixture inside backend, runner, and proxy images");
+  const nodePull = helperPulls(joinLines(fixture.run)).find((pull) => pull.alias === alias);
+  assert.deepEqual(helperPulls(script), [nodePull], "same two-registry digest pin as the witness smoke");
+  assert.ok(script.indexOf("pull-ci-image.sh") < script.search(/docker compose [^\n]*\bup\b/u));
+  const files = ["deploy/docker-compose.mcp-prober-smoke.yml", "deploy/docker-compose.mcp-prober-smoke.ci.yml"];
+  assert.deepEqual(composeStacks(script), [files, files], "cleanup and up must both use the override");
+  const services = await mergedServices(files);
+  assert.deepEqual(Object.keys(services).filter((name) => services[name].build), ["mcp-egress-proxy", "mcp-prober"]);
+  for (const name of ["mcp-egress-proxy", "mcp-prober"]) {
+    const refs = dockerfileImages(await read(services[name].build.dockerfile));
+    assert.deepEqual(refs, [`${mirror}node:22-bookworm-slim`]);
+    assert.deepEqual(services[name].build.additional_contexts,
+      Object.fromEntries(refs.map((ref) => [ref, `docker-image://${alias}`])), name);
   }
 });

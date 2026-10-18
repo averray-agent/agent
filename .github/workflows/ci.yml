@@ -119,6 +119,7 @@ jobs:
   backend:
     name: Backend — node --test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -238,10 +239,13 @@ jobs:
         run: |
           set -euo pipefail
           cleanup() {
-            docker compose -f deploy/docker-compose.mcp-prober-smoke.yml down -v --remove-orphans
+            docker compose -f deploy/docker-compose.mcp-prober-smoke.yml -f deploy/docker-compose.mcp-prober-smoke.ci.yml down -v --remove-orphans
           }
           trap cleanup EXIT
-          docker compose -f deploy/docker-compose.mcp-prober-smoke.yml \
+          bash scripts/ops/pull-ci-image.sh averray-ci/node:22-bookworm-slim \
+            mirror.gcr.io/library/node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 \
+            public.ecr.aws/docker/library/node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+          docker compose -f deploy/docker-compose.mcp-prober-smoke.yml -f deploy/docker-compose.mcp-prober-smoke.ci.yml \
             up --build --abort-on-container-exit \
             --exit-code-from mcp-smoke-driver
 
