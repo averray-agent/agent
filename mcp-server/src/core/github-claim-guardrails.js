@@ -11,6 +11,7 @@ export const DEFAULT_GITHUB_REPO_CLAIM_BURST_WALLETS = 2;
 export const DEFAULT_GITHUB_REPO_CLAIM_BURST_MIN = 10;
 export const DEFAULT_GITHUB_LANE_BURST_WALLETS = 3;
 export const DEFAULT_GITHUB_LANE_BURST_MIN = 5;
+export const DEFAULT_GITHUB_CLAIM_BURST_LOOKBACK_HOURS = 24;
 export const DEFAULT_GITHUB_PR_SELF_MERGE_MODE = "log";
 export const GITHUB_PR_SELF_MERGE_COUNTER_SCOPE = "github-pr-self-merge";
 export const GITHUB_PR_SELF_MERGE_REASON = "github_pr_self_merge_review";
@@ -36,11 +37,17 @@ export function normalizeClaimWallet(value) {
 }
 
 export function loadGithubClaimGuardrailConfig(env = process.env) {
+  const repoWindowMinutes = positiveInt(env?.GITHUB_REPO_CLAIM_BURST_MIN, DEFAULT_GITHUB_REPO_CLAIM_BURST_MIN);
+  const laneWindowMinutes = positiveInt(env?.GITHUB_LANE_BURST_MIN, DEFAULT_GITHUB_LANE_BURST_MIN);
+  const lookbackHours = positiveInt(env?.GITHUB_CLAIM_BURST_LOOKBACK_HOURS, DEFAULT_GITHUB_CLAIM_BURST_LOOKBACK_HOURS);
+  const lookbackMs = Math.max(lookbackHours * 3_600_000, repoWindowMinutes * 60_000, laneWindowMinutes * 60_000);
   return {
     repoWallets: positiveInt(env?.GITHUB_REPO_CLAIM_BURST_WALLETS, DEFAULT_GITHUB_REPO_CLAIM_BURST_WALLETS),
-    repoWindowMinutes: positiveInt(env?.GITHUB_REPO_CLAIM_BURST_MIN, DEFAULT_GITHUB_REPO_CLAIM_BURST_MIN),
+    repoWindowMinutes,
     laneWallets: positiveInt(env?.GITHUB_LANE_BURST_WALLETS, DEFAULT_GITHUB_LANE_BURST_WALLETS),
-    laneWindowMinutes: positiveInt(env?.GITHUB_LANE_BURST_MIN, DEFAULT_GITHUB_LANE_BURST_MIN)
+    laneWindowMinutes,
+    lookbackHours,
+    lookbackMs
   };
 }
 
@@ -50,13 +57,18 @@ export function loadGithubPrSelfMergeConfig(env = process.env) {
   };
 }
 
+export function isGithubBot(actor) {
+  return String(actor?.type ?? "").toLowerCase() === "bot";
+}
+
 // A person is the pull author's numeric GitHub user id from the API read.
-// A login, a renamed login, or a handle typed into a footer is not a person.
+// A login, a renamed login, a footer handle, or a Bot account is not a person.
 export function githubPersonId(lookup) {
   if (lookup?.status !== "verified") return null;
   const binding = lookup.claimantBinding;
   if (binding?.status !== "matched") return null;
   if (binding.walletMatches !== true && binding.sessionMatches !== true) return null;
+  if (isGithubBot(lookup.author)) return null;
   return positiveGithubUserId(lookup.author?.id);
 }
 
@@ -111,6 +123,8 @@ export function distinctInWindow(events, windowMs, minimum) {
   const firing = new Set();
   let left = 0;
   let max = 0;
+  let firstAt = null;
+  let lastAt = null;
   for (let right = 0; right < sorted.length; right += 1) {
     bump(counts, sorted[right].key, 1);
     while (sorted[right].at - sorted[left].at > windowMs) {
@@ -120,9 +134,11 @@ export function distinctInWindow(events, windowMs, minimum) {
     if (counts.size > max) max = counts.size;
     if (counts.size >= minimum) {
       for (const key of counts.keys()) firing.add(key);
+      if (firstAt == null || sorted[left].at < firstAt) firstAt = sorted[left].at;
+      if (lastAt == null || sorted[right].at > lastAt) lastAt = sorted[right].at;
     }
   }
-  return { max, firing: [...firing] };
+  return { max, firing: [...firing], firstAt, lastAt };
 }
 
 function claimIsOurs(claim, registry) {
@@ -135,15 +151,14 @@ function laneIdentity(wallet, links) {
   return typeof person === "number" ? `person:${person}` : `wallet:${wallet}`;
 }
 
-export function summarizeGithubClaimGuardrails({
-  claims = [],
-  links = [],
-  registry = createSelfIdentityRegistry(),
-  config = loadGithubClaimGuardrailConfig(),
-  ambiguousAuthors = 0,
-  linkedAuthors = 0
-} = {}) {
-  const byWallet = indexPersonLinks(links);
+function burstTimes(window) {
+  return {
+    firstAt: Number.isFinite(window.firstAt) ? new Date(window.firstAt).toISOString() : null,
+    lastAt: Number.isFinite(window.lastAt) ? new Date(window.lastAt).toISOString() : null
+  };
+}
+
+function scanClaimBursts(claims, { byWallet, registry, config }) {
   const repoWindowMs = config.repoWindowMinutes * 60_000;
   const laneWindowMs = config.laneWindowMinutes * 60_000;
   const byRepo = new Map();
@@ -151,19 +166,18 @@ export function summarizeGithubClaimGuardrails({
   const oursWallets = new Set();
   let repoAmbiguous = 0;
   for (const claim of claims) {
+    if (claimIsOurs(claim, registry)) {
+      oursWallets.add(claim.wallet);
+      continue;
+    }
     if (claim?.repoId == null) repoAmbiguous += 1;
     else {
       const row = byRepo.get(claim.repoId) ?? [];
       row.push({ key: claim.wallet, at: claim.claimedAt, wallet: claim.wallet });
       byRepo.set(claim.repoId, row);
     }
-    if (claimIsOurs(claim, registry)) {
-      oursWallets.add(claim.wallet);
-      continue;
-    }
     laneEvents.push({ key: laneIdentity(claim.wallet, byWallet), at: claim.claimedAt, wallet: claim.wallet });
   }
-
   const repoBursts = [];
   for (const [repoId, events] of byRepo) {
     const window = distinctInWindow(events, repoWindowMs, config.repoWallets);
@@ -172,13 +186,34 @@ export function summarizeGithubClaimGuardrails({
       repoId,
       distinctWallets: window.max,
       windowMinutes: config.repoWindowMinutes,
-      wallets: [...window.firing].sort()
+      wallets: [...window.firing].sort(),
+      ...burstTimes(window)
     });
   }
   repoBursts.sort((a, b) => a.repoId - b.repoId);
-
   const laneWindow = distinctInWindow(laneEvents, laneWindowMs, config.laneWallets);
-  const laneWarning = laneWindow.max >= config.laneWallets;
+  return {
+    repoBursts,
+    repoAmbiguous,
+    oursWallets,
+    laneWindow,
+    laneWarning: laneWindow.max >= config.laneWallets
+  };
+}
+
+export function summarizeGithubClaimGuardrails({
+  claims = [],
+  links = [],
+  registry = createSelfIdentityRegistry(),
+  config = loadGithubClaimGuardrailConfig(),
+  ambiguousAuthors = 0,
+  linkedAuthors = 0,
+  now = new Date()
+} = {}) {
+  const byWallet = indexPersonLinks(links);
+  const history = scanClaimBursts(claims, { byWallet, registry, config });
+  const cutoff = +new Date(now) - config.lookbackMs;
+  const live = scanClaimBursts(claims.filter((claim) => claim.claimedAt >= cutoff), { byWallet, registry, config });
   const persons = new Map();
   for (const [wallet, personId] of byWallet) {
     if (typeof personId !== "number") continue;
@@ -192,32 +227,34 @@ export function summarizeGithubClaimGuardrails({
     .sort((a, b) => a.personId - b.personId);
 
   const warnings = [];
-  if (repoBursts.length > 0) {
+  if (live.repoBursts.length > 0) {
+    const distinctWallets = Math.max(...live.repoBursts.map((row) => row.distinctWallets));
     warnings.push({
       code: "github_repo_claim_burst",
       severity: "warning",
-      repos: repoBursts.length,
-      distinctWallets: Math.max(...repoBursts.map((row) => row.distinctWallets)),
-      windowMinutes: config.repoWindowMinutes
+      repos: live.repoBursts.length,
+      distinctWallets,
+      windowMinutes: config.repoWindowMinutes,
+      message: `${live.repoBursts.length} GitHub ${live.repoBursts.length === 1 ? "repository has" : "repositories have"} ${distinctWallets} wallets claiming within ${config.repoWindowMinutes} minutes.`
     });
   }
-  if (laneWarning) {
+  if (live.laneWarning) {
     warnings.push({
       code: "github_lane_claim_burst",
       severity: "warning",
-      distinctClaimants: laneWindow.max,
+      distinctClaimants: live.laneWindow.max,
       windowMinutes: config.laneWindowMinutes,
-      ours: oursWallets.size
+      ours: live.oursWallets.size,
+      message: `${live.laneWindow.max} claimants claimed GitHub issues within ${config.laneWindowMinutes} minutes.`
     });
   }
-  if (sameAuthor.length > 0) {
-    warnings.push({
-      code: "same_author_multi_wallet",
-      severity: "warning",
-      persons: sameAuthor.length,
-      distinctWallets: sameAuthor.reduce((sum, row) => sum + row.distinctWallets, 0)
-    });
-  }
+  const sameAuthorWarning = sameAuthor.length > 0 ? {
+    code: "same_author_multi_wallet",
+    severity: "warning",
+    persons: sameAuthor.length,
+    distinctWallets: sameAuthor.reduce((sum, row) => sum + row.distinctWallets, 0),
+    message: `${sameAuthor.length} GitHub ${sameAuthor.length === 1 ? "author is" : "authors are"} linked to more than one wallet.`
+  } : null;
 
   return {
     warnings,
@@ -226,18 +263,21 @@ export function summarizeGithubClaimGuardrails({
       repoWindowMinutes: config.repoWindowMinutes,
       laneWallets: config.laneWallets,
       laneWindowMinutes: config.laneWindowMinutes,
-      repoBursts,
-      repoAmbiguous,
+      lookbackMs: config.lookbackMs,
+      repoBursts: history.repoBursts,
+      repoAmbiguous: history.repoAmbiguous,
       lane: {
-        warning: laneWarning,
-        distinctClaimants: laneWindow.max,
-        ours: oursWallets.size
+        warning: history.laneWarning,
+        distinctClaimants: history.laneWindow.max,
+        ours: history.oursWallets.size,
+        ...burstTimes(history.laneWindow)
       },
       sameAuthor,
+      sameAuthorWarning,
       attribution: {
         linked: linkedAuthors,
         ambiguous: ambiguousAuthors,
-        ours: oursWallets.size
+        ours: history.oursWallets.size
       }
     }
   };
@@ -274,7 +314,12 @@ export async function resolveClaimRepoIds(claims, stateStore) {
 }
 
 export function decideGithubPrSelfMerge({ lookup, wallet, links = new Map(), linksMeasured = true } = {}) {
-  const authorId = positiveGithubUserId(lookup?.author?.id);
+  // A workflow bot merging with the repository's GITHUB_TOKEN is not a maintainer
+  // decision. Count it and do not auto-settle. Log mode still settles.
+  if (isGithubBot(lookup?.mergedBy)) {
+    return { action: "ambiguous", reason: "bot_merger", blocksAutoSettle: true };
+  }
+  const authorId = isGithubBot(lookup?.author) ? null : positiveGithubUserId(lookup?.author?.id);
   const mergedById = positiveGithubUserId(lookup?.mergedBy?.id);
   const ownerId = positiveGithubUserId(lookup?.repoOwner?.id);
   const normalized = normalizeClaimWallet(wallet);
@@ -284,12 +329,13 @@ export function decideGithubPrSelfMerge({ lookup, wallet, links = new Map(), lin
   if (authorId != null && mergedById != null && authorId === mergedById) {
     return { action: "hold", reason: GITHUB_PR_SELF_MERGE_REASON, basis: "pr_author" };
   }
+  // An unread link scan must not become an allow. Enforce mode holds; log mode settles.
+  if (linksMeasured === false) {
+    return { action: "ambiguous", reason: "links_unmeasured", blocksAutoSettle: true };
+  }
   const mergerIsOwner = ownerId != null && mergedById != null && mergedById === ownerId;
-  if (mergerIsOwner) {
-    if (linksMeasured === false) return { action: "ambiguous", reason: "owner_link_unmeasured" };
-    if (linkedPerson != null && linkedPerson === mergedById) {
-      return { action: "hold", reason: GITHUB_PR_SELF_MERGE_REASON, basis: "owner_linked_wallet" };
-    }
+  if (mergerIsOwner && linkedPerson != null && linkedPerson === mergedById) {
+    return { action: "hold", reason: GITHUB_PR_SELF_MERGE_REASON, basis: "owner_linked_wallet" };
   }
   if (mergedById == null) return { action: "ambiguous", reason: "merger_unknown" };
   if (authorId == null) return { action: "ambiguous", reason: "author_unknown" };
@@ -311,12 +357,12 @@ export async function loadGithubPersonLinks(stateStore) {
         stateStore.getMutationReceipt?.("github_pr_author", session.sessionId)
       ]);
       const personId = githubPersonFromLookups(verification?.githubLookup, observation?.githubLookup);
-      if (personId != null) pairs.push({ wallet, personId });
+      if (personId != null) pairs.push({ wallet, personId, sessionId: session.sessionId });
     }
-    if (page.length < PAGE_SIZE) return { measured: true, links: indexPersonLinks(pairs) };
+    if (page.length < PAGE_SIZE) return { measured: true, pairs, links: indexPersonLinks(pairs) };
     if (offset + PAGE_SIZE >= MAX_SESSIONS) throw new Error(`GitHub person link source exceeded the ${MAX_SESSIONS} record bound`);
   }
-  return { measured: true, links: indexPersonLinks(pairs) };
+  return { measured: true, pairs, links: indexPersonLinks(pairs) };
 }
 
 function measuredCount(value) {

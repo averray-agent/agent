@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { GithubPrReviewService } from "./github-pr-review-service.js";
 import { githubReviewDisposition } from "../core/github-review-disposition.js";
-import { readGithubPrSelfMergeStatus } from "../core/github-claim-guardrails.js";
+import { loadGithubPersonLinks, readGithubPrSelfMergeStatus } from "../core/github-claim-guardrails.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { VerifierService } from "./verifier-service.js";
@@ -692,4 +692,197 @@ test("a repo owner already linked to the claimant wallet holds the payout", asyn
   }));
   await unlinked.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
   assert.deepEqual(unlinked.calls, ["verify"]);
+});
+
+test("the session's own author receipt is not a link used to decide that session", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "prior", "github_pr", "resolved");
+  await store.upsertMutationReceipt("github_pr_author", "prior", {
+    githubLookup: {
+      status: "verified",
+      author: { id: 50, login: "owner", type: "User" },
+      claimantBinding: { status: "matched", walletMatches: true }
+    }
+  });
+  await add(store, "pr");
+  await store.upsertMutationReceipt("github_pr_author", "pr", {
+    githubLookup: {
+      status: "verified",
+      author: { id: 99, login: "sock", type: "User" },
+      claimantBinding: { status: "matched", walletMatches: true }
+    }
+  });
+  const { review, calls } = selfMergeReview(store, selfMergeLookup({
+    author: { id: 99, login: "sock", type: "User" },
+    mergedBy: { id: 50, login: "owner", type: "User" },
+    repoOwner: { id: 50, login: "owner", type: "User" },
+    claimantBinding: { status: "matched", walletMatches: true }
+  }));
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+});
+
+test("an owner-linked hold survives a second poll after the session writes its own author receipt", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "prior", "github_pr", "resolved");
+  await store.upsertMutationReceipt("github_pr_author", "prior", {
+    githubLookup: {
+      status: "verified",
+      author: { id: 50, login: "owner", type: "User" },
+      claimantBinding: { status: "matched", walletMatches: true }
+    }
+  });
+  await add(store, "pr");
+  const { review, calls } = selfMergeReview(store, selfMergeLookup({
+    author: { id: 99, login: "sock", type: "User" },
+    mergedBy: { id: 50, login: "owner", type: "User" },
+    repoOwner: { id: 50, login: "owner", type: "User" },
+    claimantBinding: { status: "matched", walletMatches: true }
+  }));
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  await review.runOnce(new Date("2026-10-08T12:30:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).holdReason, "github_pr_self_merge_review");
+});
+
+test("a recorded hold stays held when a later scan would allow settlement", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  await store.upsertMutationReceipt("github_pr_review_observation", "pr", {
+    holdReason: "github_pr_self_merge_review", merged: true, previewOutcome: "approved", upstreamState: "closed"
+  });
+  const calls = [];
+  const review = new GithubPrReviewService({
+    stateStore: store, githubToken: "token", logger: { info() {}, warn() {} },
+    selfMerge: { mode: "enforce" },
+    loadPersonLinks: async () => ({ measured: true, pairs: [] }),
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: selfMergeLookup({
+        author: { id: 1, login: "worker", type: "User" },
+        mergedBy: { id: 2, login: "maintainer", type: "User" },
+        repoOwner: { id: 3, login: "owner", type: "User" }
+      }) }),
+      verifySubmission: async () => { calls.push("verify"); return { outcome: "approved" }; },
+      slashJobStake: async () => { calls.push("slash"); }
+    }
+  });
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+});
+
+test("a link-scan failure on the second poll keeps the hold and an unread scan does not settle in enforce mode", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "prior", "github_pr", "resolved");
+  await store.upsertMutationReceipt("github_pr_author", "prior", {
+    githubLookup: {
+      status: "verified",
+      author: { id: 50, login: "owner", type: "User" },
+      claimantBinding: { status: "matched", walletMatches: true }
+    }
+  });
+  await add(store, "pr");
+  let ticks = 0;
+  const calls = [];
+  const review = new GithubPrReviewService({
+    stateStore: store, githubToken: "token", logger: { info() {}, warn() {} },
+    selfMerge: { mode: "enforce" },
+    loadPersonLinks: async (stateStore) => {
+      ticks += 1;
+      if (ticks > 1) throw new Error("link scan failed");
+      return loadGithubPersonLinks(stateStore);
+    },
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: selfMergeLookup({
+        author: { id: 99, login: "sock", type: "User" },
+        mergedBy: { id: 50, login: "owner", type: "User" },
+        repoOwner: { id: 50, login: "owner", type: "User" },
+        claimantBinding: { status: "matched", walletMatches: true }
+      }) }),
+      verifySubmission: async () => { calls.push("verify"); return { outcome: "approved" }; },
+      slashJobStake: async () => { calls.push("slash"); }
+    }
+  });
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  await review.runOnce(new Date("2026-10-08T12:30:00.000Z"));
+  assert.deepEqual(calls, []);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+
+  const fresh = new MemoryStateStore();
+  await add(fresh, "pr");
+  const blocked = new GithubPrReviewService({
+    stateStore: fresh, githubToken: "token", logger: { info() {}, warn() {} },
+    selfMerge: { mode: "enforce" },
+    loadPersonLinks: async () => { throw new Error("link scan failed"); },
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: selfMergeLookup({
+        author: { id: 1, login: "worker", type: "User" },
+        mergedBy: { id: 2, login: "maintainer", type: "User" },
+        repoOwner: { id: 3, login: "owner", type: "User" }
+      }) }),
+      verifySubmission: async () => { calls.push("verify-fresh"); return { outcome: "approved" }; },
+      slashJobStake: async () => { calls.push("slash"); }
+    }
+  });
+  await blocked.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.equal(calls.includes("verify-fresh"), false);
+  assert.equal(calls.includes("slash"), false);
+  assert.equal((await fresh.getSession("pr")).status, "submitted");
+  assert.equal((await fresh.getMutationReceipt("github_pr_review_observation", "pr")).holdReason, "github_pr_self_merge_review");
+});
+
+test("a bot merger is counted and not auto-settled in enforce mode, and log mode still settles", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const lookup = selfMergeLookup({
+    author: { id: 1, login: "worker", type: "User" },
+    mergedBy: { id: 2, login: "github-actions[bot]", type: "Bot" },
+    repoOwner: { id: 1, login: "worker", type: "User" }
+  });
+  const held = selfMergeReview(store, lookup);
+  await held.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(held.calls, []);
+  assert.equal((await readGithubPrSelfMergeStatus(store)).ambiguous, 1);
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).holdReason, "github_pr_self_merge_review");
+
+  const logging = new MemoryStateStore();
+  await add(logging, "pr");
+  const calls = [];
+  const { review } = selfMergeReview(logging, lookup, {
+    mode: "log",
+    verify: async () => {
+      calls.push("verify");
+      const session = await logging.getSession("pr");
+      await logging.upsertSession({ ...session, status: "resolved" });
+      return { outcome: "approved" };
+    }
+  });
+  await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
+  assert.deepEqual(calls, ["verify"]);
+  assert.equal((await logging.getMutationReceipt("github_pr_review_observation", "pr"))?.holdReason, undefined);
+  assert.equal((await readGithubPrSelfMergeStatus(logging)).ambiguous, 1);
+});
+
+test("held sessions are listed on review status and become overdue after the SLA without session ids on the warning", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "old-hold");
+  await add(store, "young-hold");
+  const young = await store.getSession("young-hold");
+  await store.upsertSession({ ...young, submittedAt: "2026-10-08T11:00:00.000Z" });
+  for (const id of ["old-hold", "young-hold"]) {
+    await store.upsertMutationReceipt("github_pr_review_observation", id, {
+      holdReason: "github_pr_self_merge_review", merged: true, previewOutcome: "approved", upstreamState: "closed"
+    });
+  }
+  const service = new GithubPrReviewService({ stateStore: store, githubToken: "fixture" });
+  const status = await service.getStatus(new Date("2026-10-08T12:00:00.000Z"));
+  assert.equal(status.selfMergeHolds, 2);
+  assert.ok(status.selfMergeHoldSessionIds.includes("old-hold"));
+  assert.ok(status.selfMergeHoldSessionIds.includes("young-hold"));
+  const warning = status.warnings.find((item) => item.code === "github_pr_self_merge_hold_overdue");
+  assert.equal(warning.count, 1);
+  assert.equal(warning.sessionIds, undefined);
+  assert.match(warning.message, /operator releases it/);
 });

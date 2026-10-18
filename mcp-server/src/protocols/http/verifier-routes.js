@@ -50,6 +50,9 @@ export function createVerifierRoutes({
     }
 
     if (request.method === "POST" && ["/verifier/run", "/admin/verifier/run"].includes(pathname)) {
+      // This is the operator release for a github_pr_self_merge_review hold.
+      // The GitHub review poller never calls verifySubmission once that hold
+      // is recorded.
       await authenticateVerifierRun(request, url, pathname.startsWith("/admin/") ? "admin" : "verifier");
       const payload = await readJsonBody(request);
       const sessionId = typeof payload?.sessionId === "string" && payload.sessionId.trim()

@@ -13,6 +13,7 @@ import {
   decideGithubPrSelfMerge,
   GITHUB_PR_SELF_MERGE_REASON,
   incrementGithubPrSelfMergeCounter,
+  indexPersonLinks,
   loadGithubPersonLinks,
   loadGithubPrSelfMergeConfig
 } from "../core/github-claim-guardrails.js";
@@ -21,8 +22,8 @@ export class GithubPrReviewService {
   constructor({ stateStore, verifierService, githubToken = process.env.GITHUB_TOKEN,
     slaHours = positive(process.env.GITHUB_PR_REVIEW_SLA_HOURS, 48),
     intervalMs = positive(process.env.GITHUB_PR_REVIEW_POLL_MINUTES, 30) * 60_000, logger = console,
-    repoCooldown = undefined, selfMerge = undefined }) {
-    Object.assign(this, { stateStore, verifierService, slaHours, intervalMs, logger });
+    repoCooldown = undefined, selfMerge = undefined, loadPersonLinks = loadGithubPersonLinks }) {
+    Object.assign(this, { stateStore, verifierService, slaHours, intervalMs, logger, loadPersonLinks });
     this.repoCooldown = normalizeMaintainerRepoCooldownConfig(
       repoCooldown ?? loadMaintainerRepoCooldownConfig(process.env)
     );
@@ -90,16 +91,24 @@ export class GithubPrReviewService {
       disposition: githubReviewDisposition(await this.stateStore.getMutationReceipt?.("github_pr_review_observation", item.sessionId))
     })));
     const overdue = classified.filter((item) => item.disposition === "operator_review" && item.ageMs > this.slaHours * 3_600_000);
+    const holds = classified.filter((item) => item.disposition === "human_review");
+    const holdOverdue = holds.filter((item) => item.ageMs > this.slaHours * 3_600_000);
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
       githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
       waitingForMerge: classified.filter((item) => item.disposition === "waiting_for_merge").length,
       overdueReview: overdue.length,
+      selfMergeHolds: holds.length,
+      selfMergeHoldSessionIds: holds.slice(0, 50).map((item) => item.sessionId),
       warnings: [...(overdue.length > 0 ? [{
         code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: overdue[0].ageMs,
         count: overdue.length, sessionIds: overdue.slice(0, 50).map((item) => item.sessionId),
         sessionId: overdue[0].sessionId, message: "GitHub PR review is overdue; operator review required."
+      }] : []), ...(holdOverdue.length > 0 ? [{
+        code: "github_pr_self_merge_hold_overdue", severity: "warning",
+        oldestAgeMs: holdOverdue[0].ageMs, count: holdOverdue.length,
+        message: "A self-merge payout hold is past the review SLA. An operator releases it from the verifier run route."
       }] : []), ...this.runWarnings()],
       ...this.schedulerLoop.getStatus(now), lastRun: this.lastRun, recentRuns: this.recentRuns };
   }
@@ -119,11 +128,11 @@ export class GithubPrReviewService {
 
   async reviewQueue(now, summary) {
     if (!this.enabled) return summary;
-    let personLinks = new Map();
+    let personPairs = [];
     let linksMeasured = false;
     try {
-      const loaded = await loadGithubPersonLinks(this.stateStore);
-      personLinks = loaded.links;
+      const loaded = await this.loadPersonLinks(this.stateStore);
+      personPairs = loaded.pairs ?? [];
       linksMeasured = loaded.measured === true;
     } catch {
       this.logger?.warn?.({
@@ -188,17 +197,31 @@ export class GithubPrReviewService {
           && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
           // Pascal's Option 1: only merged + approved may auto-settle.
           // Open green PRs and every other outcome stay with the operator.
+          // A recorded hold is released only by POST /admin/verifier/run or
+          // POST /verifier/run, which call verifySubmission directly. This
+          // poller never calls it again, even when a later link scan is
+          // ambiguous or fails.
+          if (previous?.holdReason === GITHUB_PR_SELF_MERGE_REASON || observation.holdReason === GITHUB_PR_SELF_MERGE_REASON) {
+            summary.skipped.push({ sessionId: item.sessionId, reason: GITHUB_PR_SELF_MERGE_REASON });
+            continue;
+          }
           const decision = decideGithubPrSelfMerge({
-            lookup: upstream, wallet: item.wallet, links: personLinks, linksMeasured
+            lookup: upstream,
+            wallet: item.wallet,
+            links: indexPersonLinks(personPairs.filter((pair) => pair.sessionId !== item.sessionId)),
+            linksMeasured
           });
-          if (decision.action === "hold" && this.selfMerge.mode === "enforce") {
+          const enforceHold = this.selfMerge.mode === "enforce"
+            && (decision.action === "hold" || decision.blocksAutoSettle === true);
+          if (enforceHold) {
             const held = {
               ...observation,
               holdReason: GITHUB_PR_SELF_MERGE_REASON,
-              selfMergeNote: "hold"
+              selfMergeNote: decision.action === "hold" ? "hold" : decision.reason
             };
             await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, held);
-            if (previous?.selfMergeNote !== "hold") await this.noteSelfMerge("held", item, decision);
+            if (decision.action === "hold" && previous?.selfMergeNote !== "hold") await this.noteSelfMerge("held", item, decision);
+            else if (decision.action !== "hold" && previous?.selfMergeNote !== decision.reason) await this.noteSelfMerge("ambiguous", item, decision);
             summary.skipped.push({ sessionId: item.sessionId, reason: GITHUB_PR_SELF_MERGE_REASON });
             continue;
           }
@@ -206,9 +229,9 @@ export class GithubPrReviewService {
             await this.noteSelfMerge("wouldHold", item, decision);
             observation = { ...observation, selfMergeNote: "hold", selfMergeWouldHold: true };
             await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
-          } else if (decision.action === "ambiguous" && previous?.selfMergeNote !== "ambiguous") {
-            await this.noteSelfMerge("ambiguous", item);
-            observation = { ...observation, selfMergeNote: "ambiguous" };
+          } else if (decision.action === "ambiguous" && previous?.selfMergeNote !== (decision.reason ?? "ambiguous")) {
+            await this.noteSelfMerge("ambiguous", item, decision);
+            observation = { ...observation, selfMergeNote: decision.reason ?? "ambiguous" };
             await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
           }
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });

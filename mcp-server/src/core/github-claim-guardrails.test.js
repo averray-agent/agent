@@ -48,31 +48,31 @@ function claimSession({
   };
 }
 
-function authorReceipt(id, personId, login = "api-author") {
+function authorReceipt(id, personId, login = "api-author", extra = {}) {
   return {
     id: String(id),
     body: {
       githubLookup: {
         status: "verified",
-        author: personId == null ? { login } : { id: personId, login },
-        claimantBinding: { status: "matched", walletMatches: true },
+        author: {
+          ...(personId == null ? {} : { id: personId }),
+          login,
+          ...(extra.type ? { type: extra.type } : {})
+        },
+        claimantBinding: extra.binding ?? { status: "matched", walletMatches: true },
         merged: false
       }
     }
   };
 }
 
-async function read(sessions, { receipts = [], selfIdentityRegistry = registry } = {}) {
+async function read(sessions, { receipts = [], selfIdentityRegistry = registry, now = new Date(t0 + 86_400_000) } = {}) {
   const store = new MemoryStateStore();
   for (const session of sessions) await store.upsertSession(session);
   for (const receipt of receipts) {
     await store.upsertMutationReceipt("github_pr_author", receipt.id, receipt.body);
   }
-  return readGithubAuthors(store, {
-    now: new Date(t0 + 86_400_000),
-    selfIdentityRegistry,
-    guardrails: config
-  });
+  return readGithubAuthors(store, { now, selfIdentityRegistry, guardrails: config });
 }
 
 function codes(result) {
@@ -86,7 +86,10 @@ test("two wallets claiming one repository nine minutes apart warn, eleven minute
   ]);
   const burst = near.warnings.find((warning) => warning.code === "github_repo_claim_burst");
   assert.ok(burst);
-  assert.deepEqual(Object.keys(burst).sort(), ["code", "distinctWallets", "repos", "severity", "windowMinutes"].sort());
+  assert.deepEqual(Object.keys(burst).sort(), ["code", "distinctWallets", "message", "repos", "severity", "windowMinutes"].sort());
+  assert.match(burst.message, /2 wallets claiming within 10 minutes/);
+  assert.equal(near.claimGuardrails.repoBursts[0].firstAt, new Date(t0).toISOString());
+  assert.equal(near.claimGuardrails.repoBursts[0].lastAt, new Date(t0 + 9 * 60_000).toISOString());
   assert.equal(burst.distinctWallets, 2);
   assert.equal(burst.repos, 1);
   assert.equal(burst.windowMinutes, 10);
@@ -138,13 +141,14 @@ test("one wallet, two repositories, and a name without an id do not raise a repo
   assert.equal(renamed.claimGuardrails.repoBursts[0].repoId, REPO);
 });
 
-test("our own wallets still count toward a repository burst", async () => {
+test("our own wallets are excluded from the repository burst and the lane burst", async () => {
   const result = await read([
     claimSession({ id: "a", n: 1, at: t0, canary: true }),
     claimSession({ id: "b", n: 2, at: t0 + 60_000, canary: true })
   ]);
-  assert.equal(codes(result).includes("github_repo_claim_burst"), true);
+  assert.equal(codes(result).includes("github_repo_claim_burst"), false);
   assert.equal(codes(result).includes("github_lane_claim_burst"), false);
+  assert.equal(result.claimGuardrails.repoBursts.length, 0);
 });
 
 test("lane burst warns for three external wallets inside five minutes and not outside it", async () => {
@@ -156,7 +160,8 @@ test("lane burst warns for three external wallets inside five minutes and not ou
   assert.ok(lane);
   assert.equal(lane.distinctClaimants, 3);
   assert.equal(lane.windowMinutes, 5);
-  assert.deepEqual(Object.keys(lane).sort(), ["code", "distinctClaimants", "ours", "severity", "windowMinutes"].sort());
+  assert.deepEqual(Object.keys(lane).sort(), ["code", "distinctClaimants", "message", "ours", "severity", "windowMinutes"].sort());
+  assert.match(lane.message, /3 claimants claimed GitHub issues within 5 minutes/);
   assert.equal(JSON.stringify(inside.warnings).includes(wallet(1)), false);
 
   const outside = await read([1, 2, 3].map((n) => claimSession({
@@ -182,9 +187,10 @@ test("a linked pair counts as one claimant and an unknown author is never linked
     claimSession({ id: "c", n: 3, at: t0 + 120_000 })
   ], { receipts: [authorReceipt("a", PERSON, "old-login"), authorReceipt("b", PERSON, "new-login")] });
   assert.equal(codes(linked).includes("github_lane_claim_burst"), false);
-  const sameAuthor = linked.warnings.find((warning) => warning.code === "same_author_multi_wallet");
-  assert.ok(sameAuthor);
-  assert.deepEqual(Object.keys(sameAuthor).sort(), ["code", "distinctWallets", "persons", "severity"].sort());
+  assert.equal(codes(linked).includes("same_author_multi_wallet"), false);
+  const sameAuthor = linked.claimGuardrails.sameAuthorWarning;
+  assert.equal(sameAuthor.code, "same_author_multi_wallet");
+  assert.match(sameAuthor.message, /linked to more than one wallet/);
   assert.equal(JSON.stringify(linked.warnings).includes(String(PERSON)), false);
   assert.equal(JSON.stringify(linked.warnings).includes("old-login"), false);
   assert.equal(JSON.stringify(linked.warnings).includes("footer-handle"), false);
@@ -225,6 +231,86 @@ test("ours wallets and canary claims are ignored by the lane burst", async () =>
   })));
   assert.equal(codes(canaries).includes("github_lane_claim_burst"), false);
   assert.equal(canaries.claimGuardrails.lane.ours, 3);
+});
+
+test("an old burst stays on the admin history and does not fire a live warning", async () => {
+  const now = new Date(t0 + 48 * 3_600_000);
+  const old = await read([
+    claimSession({ id: "a", n: 1, at: t0 }),
+    claimSession({ id: "b", n: 2, at: t0 + 9 * 60_000 })
+  ], { now });
+  assert.equal(codes(old).includes("github_repo_claim_burst"), false);
+  assert.equal(old.claimGuardrails.repoBursts.length, 1);
+  assert.equal(old.claimGuardrails.repoBursts[0].firstAt, new Date(t0).toISOString());
+  assert.equal(old.claimGuardrails.repoBursts[0].lastAt, new Date(t0 + 9 * 60_000).toISOString());
+  const recent = await read([
+    claimSession({ id: "a", n: 1, at: +now - 60 * 60_000 }),
+    claimSession({ id: "b", n: 2, at: +now - 50 * 60_000 })
+  ], { now });
+  assert.equal(codes(recent).includes("github_repo_claim_burst"), true);
+});
+
+test("repository id resolution runs only for claims inside the lookback", async () => {
+  const now = new Date(t0 + 48 * 3_600_000);
+  const store = new MemoryStateStore();
+  let pins = 0;
+  store.getGithubRepositoryPin = async () => { pins += 1; return null; };
+  await store.upsertSession(claimSession({ id: "old", n: 1, repoId: null, at: t0 }));
+  await store.upsertSession(claimSession({ id: "recent", n: 2, repoId: null, at: +now - 60_000 }));
+  await readGithubAuthors(store, { now, selfIdentityRegistry: registry, guardrails: config });
+  assert.equal(pins, 1);
+  const clamped = loadGithubClaimGuardrailConfig({
+    GITHUB_CLAIM_BURST_LOOKBACK_HOURS: "1",
+    GITHUB_REPO_CLAIM_BURST_MIN: "180"
+  });
+  assert.equal(clamped.lookbackMs, 180 * 60_000);
+});
+
+test("a link requires claimant binding, a conflicting person stays ambiguous, and one wallet is not a multi-wallet author", async () => {
+  const unbound = await read([
+    claimSession({ id: "a", n: 1, at: t0, status: "submitted", submitted: true }),
+    claimSession({ id: "b", n: 2, at: t0 + 60_000, status: "submitted", submitted: true }),
+    claimSession({ id: "c", n: 3, at: t0 + 120_000 })
+  ], { receipts: [
+    authorReceipt("a", PERSON, "one", { binding: { status: "missing", walletMatches: true } }),
+    authorReceipt("b", PERSON, "one", { binding: { status: "missing", walletMatches: true } })
+  ] });
+  assert.equal(unbound.claimGuardrails.sameAuthor.length, 0);
+  assert.equal(codes(unbound).includes("github_lane_claim_burst"), true);
+
+  const conflicted = await read([
+    claimSession({ id: "a1", n: 1, at: t0, status: "submitted", submitted: true }),
+    claimSession({ id: "a2", n: 1, at: t0 + 30_000, status: "submitted", submitted: true }),
+    claimSession({ id: "b", n: 2, at: t0 + 60_000, status: "submitted", submitted: true }),
+    claimSession({ id: "c", n: 3, at: t0 + 90_000, status: "submitted", submitted: true })
+  ], { receipts: [
+    authorReceipt("a1", 10, "first"),
+    authorReceipt("a2", 20, "second"),
+    authorReceipt("b", 10, "first"),
+    authorReceipt("c", 20, "second")
+  ] });
+  assert.equal(codes(conflicted).includes("github_lane_claim_burst"), true);
+  assert.equal(conflicted.claimGuardrails.sameAuthor.some((row) => row.personId === 10 && row.wallets.includes(wallet(1))), false);
+
+  const single = await read([
+    claimSession({ id: "only", n: 4, at: t0, status: "submitted", submitted: true })
+  ], { receipts: [authorReceipt("only", PERSON, "solo")] });
+  assert.equal(single.claimGuardrails.sameAuthor.length, 0);
+  assert.equal(single.claimGuardrails.sameAuthorWarning, null);
+});
+
+test("bot authors do not link wallets", async () => {
+  const result = await read([
+    claimSession({ id: "a", n: 1, at: t0, status: "submitted", submitted: true }),
+    claimSession({ id: "b", n: 2, at: t0 + 60_000, status: "submitted", submitted: true }),
+    claimSession({ id: "c", n: 3, at: t0 + 120_000 })
+  ], { receipts: [
+    authorReceipt("a", 999, "Copilot", { type: "Bot" }),
+    authorReceipt("b", 999, "Copilot", { type: "Bot" })
+  ] });
+  assert.equal(result.claimGuardrails.sameAuthor.length, 0);
+  assert.equal(result.claimGuardrails.attribution.linked, 0);
+  assert.equal(codes(result).includes("github_lane_claim_burst"), true);
 });
 
 test("non-github jobs do not feed either burst", async () => {
@@ -338,6 +424,20 @@ test("self-merge holds only on API ids, and log mode is the default", () => {
     wallet: wallet(1),
     links: new Map()
   }).action, "allow");
+  assert.equal(decideGithubPrSelfMerge({
+    lookup: { author: { id: 1 }, mergedBy: { id: 2, type: "Bot" }, repoOwner: { id: 1 } },
+    wallet: wallet(1)
+  }).blocksAutoSettle, true);
+  assert.equal(decideGithubPrSelfMerge({
+    lookup: { author: { id: 1, type: "Bot" }, mergedBy: { id: 2 }, repoOwner: { id: 3 } },
+    wallet: wallet(1),
+    linksMeasured: true
+  }).action, "ambiguous");
+  assert.equal(decideGithubPrSelfMerge({
+    lookup: { author: { id: 1 }, mergedBy: { id: 2 }, repoOwner: { id: 3 } },
+    wallet: wallet(1),
+    linksMeasured: false
+  }).blocksAutoSettle, true);
   assert.equal(githubReviewDisposition({
     merged: true, previewOutcome: "approved", holdReason: "github_pr_self_merge_review"
   }), "human_review");

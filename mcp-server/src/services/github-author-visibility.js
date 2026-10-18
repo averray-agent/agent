@@ -103,14 +103,16 @@ export async function readGithubAuthors(stateStore, {
       else row.missingPayoutEvidence++;
     }
   }
-  await resolveClaimRepoIds(claimRows, stateStore);
+  const lookbackCutoff = +now - guardrails.lookbackMs;
+  await resolveClaimRepoIds(claimRows.filter((claim) => claim.claimedAt >= lookbackCutoff), stateStore);
   const guard = summarizeGithubClaimGuardrails({
     claims: claimRows,
     links: personLinks,
     registry: selfIdentityRegistry,
     config: guardrails,
     ambiguousAuthors,
-    linkedAuthors
+    linkedAuthors,
+    now
   });
   const rows = [...authors.values()].map(({ wallets, paidRaw, missingPayoutEvidence, ...row }) => ({
     ...row, distinctWallets: wallets.size,

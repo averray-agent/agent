@@ -1028,8 +1028,9 @@ function readGithubActor(user) {
   if (!user || typeof user !== "object") return null;
   const id = positiveRepoId(user.id);
   const login = typeof user.login === "string" && user.login.trim() ? user.login : null;
-  if (id == null && !login) return null;
-  return { ...(id != null ? { id } : {}), ...(login ? { login } : {}) };
+  const type = typeof user.type === "string" && /^[A-Za-z]{1,32}$/u.test(user.type) ? user.type : null;
+  if (id == null && !login && !type) return null;
+  return { ...(id != null ? { id } : {}), ...(login ? { login } : {}), ...(type ? { type } : {}) };
 }
 
 function readGithubRepository(repo) {
