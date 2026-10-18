@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { POSTER_REVIEW_HANDLER } from "../core/receipt-verifier-handlers.js";
 import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
 import { observeMaintainerPullRequest } from "../core/maintainer-repo-cooldown.js";
+import { verdictForStorage } from "../core/github-claim-guardrails.js";
 import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { withPinnedRepositoryIdentity } from "./github-repository-identity-backfill.js";
@@ -511,8 +512,9 @@ export class VerifierService {
 
   buildPersistedVerdict({ session, job, verdict, verificationInput, metadataURI }) {
     const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
+    const stored = verdictForStorage(verdict);
     return {
-      ...verdict,
+      ...stored,
       sessionId: session.sessionId,
       metadataURI,
       environment: verdict.environment ?? {
@@ -734,9 +736,9 @@ export class VerifierService {
   async getResult(sessionId) {
     const result = await this.stateStore.getVerificationResult(sessionId);
     const session = await this.stateStore.getSession(sessionId);
-    if (session?.operatorOverturn) return projectOverturnedVerification(session, result);
+    if (session?.operatorOverturn) return verdictForStorage(projectOverturnedVerification(session, result));
     if (result) {
-      return result;
+      return verdictForStorage(result);
     }
     // No verdict persisted yet. If the session exists and is awaiting
     // verification (submitted, or disputed pending human resolution), report a

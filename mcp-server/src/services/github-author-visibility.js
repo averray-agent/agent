@@ -1,5 +1,14 @@
 import { formatBaseUnits } from "../core/platform-service-helpers.js";
 import { approvedSettlement } from "../core/retained-workers.js";
+import { createSelfIdentityRegistry } from "../core/self-identity-registry.js";
+import {
+  githubPersonFromLookups,
+  loadGithubClaimGuardrailConfig,
+  normalizeClaimWallet,
+  readGithubIssueClaim,
+  resolveClaimRepoIds,
+  summarizeGithubClaimGuardrails
+} from "../core/github-claim-guardrails.js";
 
 const DAY = 86_400_000;
 const MAX_SESSIONS = 10_000;
@@ -16,7 +25,12 @@ export function boundGithubAuthor(lookup) {
     ? { login: login.toLowerCase() } : null;
 }
 
-export async function readGithubAuthors(stateStore, { now = new Date(), sessions } = {}) {
+export async function readGithubAuthors(stateStore, {
+  now = new Date(),
+  sessions,
+  selfIdentityRegistry = createSelfIdentityRegistry(),
+  guardrails = loadGithubClaimGuardrailConfig()
+} = {}) {
   if (!sessions) {
     sessions = [];
     for (let offset = 0; offset < MAX_SESSIONS; offset += PAGE_SIZE) {
@@ -28,10 +42,15 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
     }
   }
   const authors = new Map(), wallets = new Set(), seen = new Set();
+  const claimRows = [];
+  const personLinks = [];
   let openClaims = 0, unattributedClaims = 0, unattributedSessions = 0, githubSessions = 0;
+  let ambiguousAuthors = 0, linkedAuthors = 0;
   for (const session of sessions) {
     if (seen.has(session.sessionId)) continue;
     seen.add(session.sessionId);
+    const claim = readGithubIssueClaim(session);
+    if (claim) claimRows.push(claim);
     const job = session.jobSnapshot?.definition;
     if ((job?.verifierConfig?.handler ?? job?.verifierMode) !== "github_pr") continue;
     githubSessions++;
@@ -45,6 +64,16 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
     ]);
     const author = boundGithubAuthor(verification?.githubLookup) ?? boundGithubAuthor(observation?.githubLookup);
     const lookup = boundGithubAuthor(verification?.githubLookup) ? verification.githubLookup : observation?.githubLookup;
+    const personId = githubPersonFromLookups(verification?.githubLookup, observation?.githubLookup);
+    const attributionAttempt = session.status !== "claimed" || session.submission || session.submittedAt;
+    if (attributionAttempt) {
+      if (personId == null) ambiguousAuthors += 1;
+      else {
+        linkedAuthors += 1;
+        const linkedWallet = normalizeClaimWallet(session.wallet);
+        if (linkedWallet) personLinks.push({ wallet: linkedWallet, personId });
+      }
+    }
     if (!author) {
       unattributedSessions++;
       if (open) unattributedClaims++;
@@ -74,6 +103,17 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
       else row.missingPayoutEvidence++;
     }
   }
+  const lookbackCutoff = +now - guardrails.lookbackMs;
+  await resolveClaimRepoIds(claimRows.filter((claim) => claim.claimedAt >= lookbackCutoff), stateStore);
+  const guard = summarizeGithubClaimGuardrails({
+    claims: claimRows,
+    links: personLinks,
+    registry: selfIdentityRegistry,
+    config: guardrails,
+    ambiguousAuthors,
+    linkedAuthors,
+    now
+  });
   const rows = [...authors.values()].map(({ wallets, paidRaw, missingPayoutEvidence, ...row }) => ({
     ...row, distinctWallets: wallets.size,
     usdcPaid: { raw: missingPayoutEvidence ? null : String(paidRaw),
@@ -84,18 +124,24 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
     openClaimStatuses: [...openStatuses], paidWindow: "retained history; confirmed worker USDC payout only",
     githubSessions, distinctAuthors: rows.length, distinctWallets: wallets.size,
     openClaims, unattributedClaims, unattributedSessions, authors: rows,
-    warnings: rows.filter((row) => row.openClaims >= 3 && row.openClaims > openClaims / 2).map((row) => ({
-      code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
-      totalOpenClaims: openClaims, distinctWallets: row.distinctWallets
-    }))
+    warnings: [
+      ...rows.filter((row) => row.openClaims >= 3 && row.openClaims > openClaims / 2).map((row) => ({
+        code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
+        totalOpenClaims: openClaims, distinctWallets: row.distinctWallets
+      })),
+      ...guard.warnings
+    ],
+    claimGuardrails: guard.admin
   };
 }
 
-export function createGithubAuthorsProvider(stateStore, { now = () => new Date(), ttlMs = 60_000 } = {}) {
+export function createGithubAuthorsProvider(stateStore, {
+  now = () => new Date(), ttlMs = 60_000, selfIdentityRegistry
+} = {}) {
   let cached, expires = 0, pending;
   return async () => {
     if (cached && +now() < expires) return cached;
-    if (!pending) pending = readGithubAuthors(stateStore, { now: now() }).then((value) => {
+    if (!pending) pending = readGithubAuthors(stateStore, { now: now(), selfIdentityRegistry }).then((value) => {
       cached = value; expires = +now() + ttlMs; return value;
     }).finally(() => { pending = undefined; });
     return pending;

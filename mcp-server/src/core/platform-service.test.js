@@ -2298,6 +2298,10 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   assert.equal(status.ops.maintainerRepoCooldown.ambiguous, 0);
   assert.equal(status.ops.maintainerRepoCooldown.days, service.jobExecutionService.repoCooldown.days);
   assert.equal(status.ops.maintainerRepoCooldown.repeatDays, service.jobExecutionService.repoCooldown.repeatDays);
+  assert.equal(status.ops.githubPrSelfMerge.mode, "log");
+  assert.equal(status.ops.githubPrSelfMerge.wouldHold, 0);
+  assert.equal(status.ops.githubPrSelfMerge.held, 0);
+  assert.equal(status.ops.githubPrSelfMerge.ambiguous, 0);
 });
 
 test("getAdminStatus exposes durable per-wallet SIWE conversion telemetry", async () => {
