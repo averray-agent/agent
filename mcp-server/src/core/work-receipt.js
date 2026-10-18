@@ -162,14 +162,14 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
       handler: profile.handler,
       handlerVersion: Number(profile.handlerVersion)
     },
-    verdict: {
+    verdict: compact({
       outcome,
       reasonCode,
       reason: firstString(verdict?.reason),
       evidenceHash: bytes32(verdict?.evidenceHash)
         ?? hashCanonicalContent(verdict?.evidence ?? execution?.report ?? null),
       workerConsequence: "none"
-    },
+    }),
     intent: {
       specHash,
       specSource: "verify_request",
