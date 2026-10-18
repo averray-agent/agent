@@ -22,6 +22,27 @@ test("GitHub read-failure alerts report failure counts, not a fabricated overdue
   assert.doesNotMatch(alerts[0].body, /NaN|undefined/u);
 });
 
+test("a self-merge hold overdue alert names the operator hold and its session", async () => {
+  const alerts = await listAlerts({ listDisputes: async () => [], listPolicies: () => [], service: {
+    listRecentSessions: async () => [],
+    githubPrReview: { getStatus: async () => ({
+      githubPrCount: 4,
+      selfMergeHoldSessionIds: ["session-hold"],
+      warnings: [{
+        code: "github_pr_self_merge_hold_overdue",
+        oldestAgeMs: 50 * 3_600_000,
+        count: 1,
+        message: "A self-merge payout hold is past the review SLA. An operator releases it from the verifier run route."
+      }]
+    }) }
+  } });
+  assert.equal(alerts[0].title, "Self-merge payout hold awaiting operator");
+  assert.equal(alerts[0].ref, "session-hold");
+  assert.match(alerts[0].body, /1 self-merge payout hold is past the review SLA; oldest 50 hours/u);
+  assert.doesNotMatch(alerts[0].title, /GitHub PR review overdue/u);
+  assert.equal(JSON.stringify(alerts).includes("0x"), false);
+});
+
 test("compactWallet preserves short values and compacts long wallets", () => {
   assert.equal(compactWallet(""), "system");
   assert.equal(compactWallet("0xabc"), "0xabc");

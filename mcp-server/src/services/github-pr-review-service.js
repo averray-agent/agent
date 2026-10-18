@@ -87,12 +87,21 @@ export class GithubPrReviewService {
     const queue = await this.pending({ now, upstream: false });
     const github = queue.items.filter((item) => item.verifierMode === "github_pr");
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
-    const classified = await Promise.all(github.map(async (item) => ({ ...item,
-      disposition: githubReviewDisposition(await this.stateStore.getMutationReceipt?.("github_pr_review_observation", item.sessionId))
-    })));
-    const overdue = classified.filter((item) => item.disposition === "operator_review" && item.ageMs > this.slaHours * 3_600_000);
+    const classified = await Promise.all(github.map(async (item) => {
+      const observation = await this.stateStore.getMutationReceipt?.("github_pr_review_observation", item.sessionId);
+      return { ...item, observation, disposition: githubReviewDisposition(observation) };
+    }));
+    const slaMs = this.slaHours * 3_600_000;
+    const overdue = classified.filter((item) => item.disposition === "operator_review" && item.ageMs > slaMs);
     const holds = classified.filter((item) => item.disposition === "human_review");
-    const holdOverdue = holds.filter((item) => item.ageMs > this.slaHours * 3_600_000);
+    const holdAgeMs = (item) => {
+      const heldAt = Date.parse(item.observation?.heldAt ?? "");
+      return Number.isFinite(heldAt) ? Math.max(0, +now - heldAt) : null;
+    };
+    const holdOverdue = holds.filter((item) => {
+      const age = holdAgeMs(item);
+      return age != null && age > slaMs;
+    }).sort((a, b) => holdAgeMs(b) - holdAgeMs(a));
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
       githubUpstream: this.getUpstreamHealth(now, github.length),
@@ -107,7 +116,7 @@ export class GithubPrReviewService {
         sessionId: overdue[0].sessionId, message: "GitHub PR review is overdue; operator review required."
       }] : []), ...(holdOverdue.length > 0 ? [{
         code: "github_pr_self_merge_hold_overdue", severity: "warning",
-        oldestAgeMs: holdOverdue[0].ageMs, count: holdOverdue.length,
+        oldestAgeMs: holdAgeMs(holdOverdue[0]), count: holdOverdue.length,
         message: "A self-merge payout hold is past the review SLA. An operator releases it from the verifier run route."
       }] : []), ...this.runWarnings()],
       ...this.schedulerLoop.getStatus(now), lastRun: this.lastRun, recentRuns: this.recentRuns };
@@ -211,17 +220,23 @@ export class GithubPrReviewService {
             links: indexPersonLinks(personPairs.filter((pair) => pair.sessionId !== item.sessionId)),
             linksMeasured
           });
-          const enforceHold = this.selfMerge.mode === "enforce"
-            && (decision.action === "hold" || decision.blocksAutoSettle === true);
+          // An unread link scan is not evidence of a self-merge. Skip this tick
+          // and try again on the next poll. Do not record a hold.
+          if (this.selfMerge.mode === "enforce" && decision.reason === "links_unmeasured") {
+            summary.skipped.push({ sessionId: item.sessionId, reason: "github_person_links_unmeasured" });
+            continue;
+          }
+          const enforceHold = this.selfMerge.mode === "enforce" && decision.action === "hold";
           if (enforceHold) {
             const held = {
               ...observation,
               holdReason: GITHUB_PR_SELF_MERGE_REASON,
-              selfMergeNote: decision.action === "hold" ? "hold" : decision.reason
+              heldAt: observation.heldAt ?? new Date(now).toISOString(),
+              selfMergeNote: "hold",
+              selfMergeBasis: decision.basis ?? null
             };
             await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, held);
-            if (decision.action === "hold" && previous?.selfMergeNote !== "hold") await this.noteSelfMerge("held", item, decision);
-            else if (decision.action !== "hold" && previous?.selfMergeNote !== decision.reason) await this.noteSelfMerge("ambiguous", item, decision);
+            if (previous?.selfMergeNote !== "hold") await this.noteSelfMerge("held", item, decision);
             summary.skipped.push({ sessionId: item.sessionId, reason: GITHUB_PR_SELF_MERGE_REASON });
             continue;
           }

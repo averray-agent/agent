@@ -830,7 +830,12 @@ test("a link-scan failure on the second poll keeps the hold and an unread scan d
   assert.equal(calls.includes("verify-fresh"), false);
   assert.equal(calls.includes("slash"), false);
   assert.equal((await fresh.getSession("pr")).status, "submitted");
-  assert.equal((await fresh.getMutationReceipt("github_pr_review_observation", "pr")).holdReason, "github_pr_self_merge_review");
+  assert.equal((await fresh.getMutationReceipt("github_pr_review_observation", "pr"))?.holdReason, undefined);
+  assert.equal((await readGithubPrSelfMergeStatus(fresh)).held, 0);
+  blocked.loadPersonLinks = async () => ({ measured: true, pairs: [] });
+  await blocked.runOnce(new Date("2026-10-08T12:30:00.000Z"));
+  assert.equal(calls.includes("verify-fresh"), true);
+  assert.equal((await fresh.getSession("pr")).status, "submitted");
 });
 
 test("a bot merger is counted and not auto-settled in enforce mode, and log mode still settles", async () => {
@@ -844,8 +849,10 @@ test("a bot merger is counted and not auto-settled in enforce mode, and log mode
   const held = selfMergeReview(store, lookup);
   await held.review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
   assert.deepEqual(held.calls, []);
-  assert.equal((await readGithubPrSelfMergeStatus(store)).ambiguous, 1);
+  assert.equal((await readGithubPrSelfMergeStatus(store)).held, 1);
+  assert.equal((await readGithubPrSelfMergeStatus(store)).ambiguous, 0);
   assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).holdReason, "github_pr_self_merge_review");
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).selfMergeBasis, "bot_merger");
 
   const logging = new MemoryStateStore();
   await add(logging, "pr");
@@ -862,7 +869,8 @@ test("a bot merger is counted and not auto-settled in enforce mode, and log mode
   await review.runOnce(new Date("2026-10-08T12:00:00.000Z"));
   assert.deepEqual(calls, ["verify"]);
   assert.equal((await logging.getMutationReceipt("github_pr_review_observation", "pr"))?.holdReason, undefined);
-  assert.equal((await readGithubPrSelfMergeStatus(logging)).ambiguous, 1);
+  assert.equal((await readGithubPrSelfMergeStatus(logging)).wouldHold, 1);
+  assert.equal((await readGithubPrSelfMergeStatus(logging)).held, 0);
 });
 
 test("held sessions are listed on review status and become overdue after the SLA without session ids on the warning", async () => {
@@ -870,19 +878,26 @@ test("held sessions are listed on review status and become overdue after the SLA
   await add(store, "old-hold");
   await add(store, "young-hold");
   const young = await store.getSession("young-hold");
-  await store.upsertSession({ ...young, submittedAt: "2026-10-08T11:00:00.000Z" });
-  for (const id of ["old-hold", "young-hold"]) {
-    await store.upsertMutationReceipt("github_pr_review_observation", id, {
-      holdReason: "github_pr_self_merge_review", merged: true, previewOutcome: "approved", upstreamState: "closed"
-    });
-  }
+  const old = await store.getSession("old-hold");
+  await store.upsertSession({ ...young, submittedAt: "2026-09-01T00:00:00.000Z" });
+  await store.upsertSession({ ...old, submittedAt: "2026-09-01T00:00:00.000Z" });
+  const now = new Date("2026-10-08T12:00:00.000Z");
+  await store.upsertMutationReceipt("github_pr_review_observation", "old-hold", {
+    holdReason: "github_pr_self_merge_review", heldAt: new Date(+now - 49 * 3_600_000).toISOString(),
+    merged: true, previewOutcome: "approved", upstreamState: "closed"
+  });
+  await store.upsertMutationReceipt("github_pr_review_observation", "young-hold", {
+    holdReason: "github_pr_self_merge_review", heldAt: new Date(+now - 3_600_000).toISOString(),
+    merged: true, previewOutcome: "approved", upstreamState: "closed"
+  });
   const service = new GithubPrReviewService({ stateStore: store, githubToken: "fixture" });
-  const status = await service.getStatus(new Date("2026-10-08T12:00:00.000Z"));
+  const status = await service.getStatus(now);
   assert.equal(status.selfMergeHolds, 2);
   assert.ok(status.selfMergeHoldSessionIds.includes("old-hold"));
   assert.ok(status.selfMergeHoldSessionIds.includes("young-hold"));
   const warning = status.warnings.find((item) => item.code === "github_pr_self_merge_hold_overdue");
   assert.equal(warning.count, 1);
+  assert.equal(warning.oldestAgeMs, 49 * 3_600_000);
   assert.equal(warning.sessionIds, undefined);
   assert.match(warning.message, /operator releases it/);
 });
