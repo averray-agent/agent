@@ -3,8 +3,15 @@ name: agent-mainnet
 # Parallel, internal-only mainnet stack for the zero-gap cutover. The live
 # agent-stack project (testnet backend/indexer/Caddy/Postgres/Redis) remains
 # untouched while this project is built and verified.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   mainnet-redis:
+    logging: *default-logging
     image: redis:7-alpine
     container_name: agent-mainnet-redis
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
@@ -20,6 +27,7 @@ services:
       retries: 12
 
   mainnet-witness-docker-proxy:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: deploy/witness-docker-proxy/Dockerfile
@@ -54,6 +62,7 @@ services:
       retries: 12
 
   mainnet-witness-runner:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: mcp-server/Dockerfile.witness-runner
@@ -95,6 +104,7 @@ services:
       - witness-docker-control
 
   mainnet-mcp-egress-proxy:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: deploy/mcp-egress-proxy/Dockerfile
@@ -124,6 +134,7 @@ services:
       retries: 12
 
   mainnet-mcp-prober:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: mcp-server/Dockerfile.mcp-prober
@@ -152,6 +163,7 @@ services:
       retries: 12
 
   mainnet-backend:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: mcp-server/Dockerfile
@@ -195,6 +207,7 @@ services:
       start_period: 30s
 
   mainnet-indexer:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: indexer/Dockerfile
