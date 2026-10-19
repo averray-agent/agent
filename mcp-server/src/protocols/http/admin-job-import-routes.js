@@ -1,4 +1,5 @@
 import { normalizeError } from "../../core/errors.js";
+import { rejectCallerCanaryMint } from "../../core/self-identity-registry.js";
 import {
   assertIngestedCatalogVerifierCanReject,
   NON_FAILABLE_VERIFIER_CODE
@@ -40,11 +41,12 @@ export async function createJobsFromImportResult(service, jobs, { now = new Date
 
   for (const job of jobs) {
     try {
-      assertIngestedCatalogVerifierCanReject(job);
+      const safe = rejectCallerCanaryMint(job);
+      assertIngestedCatalogVerifierCanReject(safe);
       const action = () => service.createOperatorImportedJob
-        ? service.createOperatorImportedJob(job) : service.createJob(job);
+        ? service.createOperatorImportedJob(safe) : service.createJob(safe);
       created.push(await (service.catalogueLaneDiscipline?.post
-        ? service.catalogueLaneDiscipline.post(job, action, { now, origin: "operator" })
+        ? service.catalogueLaneDiscipline.post(safe, action, { now, origin: "operator" })
         : action()));
     } catch (error) {
       const normalized = normalizeError(error);

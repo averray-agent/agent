@@ -15,6 +15,10 @@ import { JobExecutionService } from "./job-execution-service.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
 import { MemoryStateStore } from "./state-store.js";
 import { createJobRoutes } from "../protocols/http/job-routes.js";
+import { createExternalJobRoutes } from "../protocols/http/external-job-routes.js";
+import { readJsonBody, respond } from "../protocols/http/http-helpers.js";
+import { createMcpToolExecutor } from "../protocols/mcp/tools.js";
+import { SERVER_CANARY_CREATED_BY } from "./self-identity-registry.js";
 
 const POSTER = "0x1111111111111111111111111111111111111111";
 const OTHER_POSTER = "0x2222222222222222222222222222222222222222";
@@ -346,6 +350,43 @@ test("external definitions cannot opt into the curated operator gas subsidy or o
     (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
     ["validation_rejected", "validation_rejected"]
   );
+});
+
+test("MCP draftJob and external posting cannot mint a canary tag", async () => {
+  const { service } = makeService();
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleExternalJobRoute: createExternalJobRoutes({
+      authMiddleware: async () => ({ wallet: POSTER, claims: {} }),
+      enforceLimit: async () => {},
+      externalPostingService: service,
+      rateLimitConfig: { externalDrafts: { limit: 30, windowSeconds: 60 } },
+      readJsonBody,
+      respond
+    }),
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: async () => false
+  });
+  const request = { headers: { authorization: "Bearer poster" }, socket: { remoteAddress: "127.0.0.1" } };
+  await assert.rejects(
+    () => execute("draftJob", {
+      definition: definition({ disposableProof: true })
+    }, { request }),
+    (error) => error.code === "reserved_canary_field"
+  );
+  await assert.rejects(
+    () => service.createDraft(POSTER, { definition: definition({ id: "worker-canary-evil" }) }),
+    (error) => error.code === "reserved_canary_job_id"
+  );
+  const drafted = await execute("draftJob", {
+    definition: definition({
+      lineage: { createdBy: SERVER_CANARY_CREATED_BY, note: "poster" }
+    })
+  }, { request });
+  assert.equal(drafted.definition.lineage?.createdBy, undefined);
+  assert.equal(drafted.definition.lineage?.note, "poster");
+  assert.equal(drafted.definition.disposableProof, undefined);
+  assert.equal(JSON.stringify(drafted).includes(SERVER_CANARY_CREATED_BY), false);
 });
 
 test("external designated-claimant field accepts one checksummed address and rejects riders", async () => {

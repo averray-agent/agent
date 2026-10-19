@@ -1,4 +1,9 @@
+import { randomUUID } from "node:crypto";
+
+import { getAddress } from "ethers";
+
 import { isHostedCanaryClaimant } from "./claimant-attribution.js";
+import { ConflictError, ValidationError } from "./errors.js";
 
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const SELF_CLIENT_PREFIX = "averray-";
@@ -29,13 +34,37 @@ export const PUBLIC_IDENTITY_CLASSES = Object.freeze({
   UNKNOWN: "unknown"
 });
 
+export const ADMIN_OURS_SCOPE = "self-identity-admin-ours";
+export const ADMIN_OURS_LIMIT = 64;
+export const ADMIN_OURS_REMOVAL_LIMIT = 256;
+export const ADMIN_OURS_LABELS = Object.freeze({
+  canary: SELF_IDENTITY_KINDS.CANARY,
+  acceptance: SELF_IDENTITY_KINDS.ACCEPTANCE,
+  "qa-engineer": SELF_IDENTITY_KINDS.QA_ENGINEER,
+  "blind-user": SELF_IDENTITY_KINDS.BLIND_USER,
+  dogfood: SELF_IDENTITY_KINDS.OPERATOR
+});
+// Written only by the operator canary create path. Public job input cannot
+// set this value; classify does not treat it, a job id, or disposableProof
+// as identity on its own.
+export const SERVER_CANARY_CREATED_BY = "operator-canary-service";
+const RESERVED_CANARY_JOB_ID = /^worker-canary(?:-|$)/iu;
+const CALLER_CANARY_FIELDS = Object.freeze([
+  "disposableProof",
+  "canary",
+  "canaryService",
+  "hostedWorkerCanary",
+  "claimantAttribution"
+]);
+
 /**
  * One truth source for deciding whether a wallet/client is Averray-operated.
  *
  * The registry deliberately answers only the attribution question. It never
  * joins wallets to IPs and it never guesses from a job name. Per-run canaries
  * qualify only through the wallet-bound marker evidence persisted on their
- * session; every unmarked identity remains external.
+ * session. A canary-shaped job (id, disposableProof, or lineage) is not
+ * identity by itself; an invalid marker fails closed before any other signal.
  */
 export class SelfIdentityRegistry {
   constructor({
@@ -70,18 +99,23 @@ export class SelfIdentityRegistry {
     this.viewerWallets = walletSet(viewerWallets);
     this.selfClients = clientSet(selfClients);
     this.ambiguousClients = clientSet(ambiguousClients);
+    this.adminOurs = new Map();
   }
 
   classify({ wallet, clientInfo, session, canaryMarkerValid, apiKeyId } = {}) {
     const normalizedWallet = normalizeWallet(wallet ?? session?.wallet);
     const clientName = normalizeClientName(clientInfo?.name ?? clientInfo);
 
+    // A presented-but-invalid marker is positive evidence of nothing. It is
+    // checked before a canary-shaped job or a static allowlist, and it cannot
+    // borrow another classification.
+    if (canaryMarkerValid === false) return externalIdentity("invalid_canary_marker");
+    // Real canary claims carry the server-verified wallet-bound marker. A job
+    // tag alone, including a server-stamped canary job, never makes a claimant
+    // ours: those jobs are publicly listed and outsiders have claimed them.
     if (canaryMarkerValid === true || isHostedCanaryClaimant(session)) {
       return selfIdentity(SELF_IDENTITY_KINDS.CANARY, "wallet_bound_canary_marker");
     }
-    // A presented-but-invalid marker is positive evidence of nothing. Keep the
-    // old fail-safe direction: it cannot borrow another static classification.
-    if (canaryMarkerValid === false) return externalIdentity("invalid_canary_marker");
 
     // A verified API-key id is operator tooling even when the wallet it rides
     // on is not itself listed. Unknown ids fall through; they never become self.
@@ -116,6 +150,8 @@ export class SelfIdentityRegistry {
       if (this.viewerWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.VIEWER, "operator_viewer_wallet_registry");
       }
+      const adminOurs = this.adminOurs.get(normalizedWallet);
+      if (adminOurs) return selfIdentity(adminOurs.kind, "admin_ours_registry");
       return externalIdentity("unlisted_wallet");
     }
 
@@ -165,6 +201,31 @@ export class SelfIdentityRegistry {
 
   replaceAmbiguousClients(values) {
     this.ambiguousClients = clientSet(values);
+  }
+
+  replaceAdminOurs(entries) {
+    const next = new Map();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const wallet = normalizeWallet(entry?.wallet);
+      const kind = ADMIN_OURS_LABELS[entry?.label];
+      if (!wallet || !kind) continue;
+      next.set(wallet, { kind, label: entry.label });
+    }
+    this.adminOurs = next;
+  }
+
+  async hydrateAdminOurs(stateStore) {
+    if (typeof stateStore?.getServiceState !== "function") {
+      this.replaceAdminOurs([]);
+      return this;
+    }
+    try {
+      const stored = await stateStore.getServiceState(ADMIN_OURS_SCOPE);
+      this.replaceAdminOurs(Array.isArray(stored?.wallets) ? stored.wallets : []);
+    } catch {
+      // An unread store is not evidence that the list is empty.
+    }
+    return this;
   }
 
   classifyApiKeyId(apiKeyId) {
@@ -251,6 +312,163 @@ export function describeSelfIdentity(identity) {
     authority: SELF_IDENTITY_AUTHORITY,
     evidence: identity?.evidence ?? "identity_unavailable"
   };
+}
+
+export function isReservedCanaryJobId(value) {
+  return RESERVED_CANARY_JOB_ID.test(String(value ?? "").trim());
+}
+
+/**
+ * Drop caller-controlled canary fields. `disposableProof` is removed;
+ * `lineage.createdBy` is removed so a caller cannot claim the operator stamp.
+ * Other lineage keys are kept.
+ */
+export function stripCallerCanaryControls(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const next = { ...input };
+  for (const field of CALLER_CANARY_FIELDS) delete next[field];
+  if (next.lineage && typeof next.lineage === "object" && !Array.isArray(next.lineage)) {
+    const lineage = { ...next.lineage };
+    delete lineage.createdBy;
+    delete lineage.canaryService;
+    next.lineage = lineage;
+  }
+  return next;
+}
+
+/** Non-operator create paths: reject a reserved id, then strip canary fields. */
+export function rejectCallerCanaryMint(input) {
+  if (isReservedCanaryJobId(input?.id)) {
+    throw new ValidationError("Job id uses a reserved canary prefix.");
+  }
+  return stripCallerCanaryControls(input);
+}
+
+/**
+ * Operator create keeps disposableProof and a reserved canary id (the worker
+ * canary script posts those), but still cannot supply lineage.createdBy.
+ */
+export function prepareOperatorCanaryInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const next = { ...input };
+  for (const field of CALLER_CANARY_FIELDS) {
+    if (field !== "disposableProof") delete next[field];
+  }
+  if (next.lineage && typeof next.lineage === "object" && !Array.isArray(next.lineage)) {
+    const lineage = { ...next.lineage };
+    delete lineage.createdBy;
+    delete lineage.canaryService;
+    next.lineage = lineage;
+  }
+  return next;
+}
+
+/** Server-written stamp. Classify does not read this; public input cannot set it. */
+export function stampServerCanaryLineage(job) {
+  if (!job || typeof job !== "object") return job;
+  const tagged = job.disposableProof === true || isReservedCanaryJobId(job.id);
+  if (!tagged) return job;
+  const lineage = job.lineage && typeof job.lineage === "object" && !Array.isArray(job.lineage)
+    ? job.lineage
+    : {};
+  job.lineage = { ...lineage, createdBy: SERVER_CANARY_CREATED_BY };
+  return job;
+}
+
+const PURPOSE_RE = /^[a-z0-9][a-z0-9 _./-]{0,80}$/iu;
+
+export async function editAdminOurs(stateStore, {
+  action,
+  wallet,
+  label,
+  purpose,
+  addedBy,
+  reason,
+  now = new Date(),
+  logger
+} = {}) {
+  if (action !== "add" && action !== "remove") {
+    throw new ValidationError("Action must be add or remove.");
+  }
+  const normalized = normalizeWallet(wallet);
+  if (!normalized) throw new ValidationError("A wallet address is required.");
+  if (action === "add" && !ADMIN_OURS_LABELS[label]) {
+    throw new ValidationError("Label must be canary, acceptance, qa-engineer, blind-user, or dogfood.");
+  }
+  if (action === "add" && !PURPOSE_RE.test(String(purpose ?? ""))) {
+    throw new ValidationError("Purpose must be a short label.");
+  }
+  const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+  if (!trimmedReason || trimmedReason.length > 200) {
+    throw new ValidationError("A reason of at most 200 characters is required.");
+  }
+  const checksum = checksumWallet(normalized);
+  const actor = checksumWallet(addedBy) ?? null;
+  const editedAt = new Date(now).toISOString();
+  if (typeof stateStore?.acquireServiceLock !== "function") {
+    throw new ConflictError("Ours edits require the service lock.", "self_identity_ours_lock_unavailable");
+  }
+  const owner = randomUUID();
+  const acquired = await stateStore.acquireServiceLock(ADMIN_OURS_SCOPE, owner, 30);
+  if (acquired === false) {
+    throw new ConflictError("Another edit of the ours list is in progress.", "self_identity_ours_in_progress");
+  }
+  try {
+    const stored = await stateStore.getServiceState?.(ADMIN_OURS_SCOPE);
+    const wallets = Array.isArray(stored?.wallets) ? stored.wallets.filter((entry) => normalizeWallet(entry?.wallet)) : [];
+    const removals = Array.isArray(stored?.removals) ? stored.removals.slice(-ADMIN_OURS_REMOVAL_LIMIT) : [];
+    const without = wallets.filter((entry) => normalizeWallet(entry.wallet) !== normalized);
+    const previous = wallets.find((entry) => normalizeWallet(entry.wallet) === normalized) ?? null;
+    let next = without;
+    let removal = null;
+    if (action === "remove") {
+      removal = {
+        wallet: checksum,
+        label: previous?.label ?? null,
+        purpose: previous?.purpose ?? null,
+        reason: trimmedReason,
+        removedBy: actor,
+        removedAt: editedAt,
+        addedBy: previous?.addedBy ?? null,
+        addedAt: previous?.addedAt ?? null
+      };
+      removals.push(removal);
+    } else {
+      if (without.length >= ADMIN_OURS_LIMIT) {
+        throw new ValidationError("The ours list is full.");
+      }
+      next = [...without, {
+        wallet: checksum,
+        label,
+        purpose: String(purpose).trim(),
+        reason: trimmedReason,
+        addedBy: actor,
+        addedAt: editedAt
+      }];
+    }
+    const keptRemovals = removals.slice(-ADMIN_OURS_REMOVAL_LIMIT);
+    await stateStore.upsertServiceState?.(ADMIN_OURS_SCOPE, { wallets: next, removals: keptRemovals });
+    logger?.info?.({
+      event: "self_identity_ours_edited",
+      action,
+      label: action === "add" ? label : previous?.label ?? null,
+      purpose: action === "add" ? String(purpose).trim() : previous?.purpose ?? null,
+      reason: trimmedReason,
+      wallet: checksum,
+      addedBy: actor,
+      removedAt: removal?.removedAt ?? null,
+      activeCount: next.length
+    }, "self_identity_ours_edited");
+    return { action, label: action === "add" ? label : null, count: next.length, wallets: next, removals: keptRemovals };
+  } finally {
+    await stateStore.releaseServiceLock?.(ADMIN_OURS_SCOPE, owner);
+  }
+}
+
+function checksumWallet(value) {
+  const normalized = normalizeWallet(value);
+  if (!normalized) return undefined;
+  return getAddress(normalized);
 }
 
 function selfIdentity(kind, evidence) {
