@@ -13,7 +13,7 @@ export function createAdminSelfIdentityRoutes({
   return async function handleAdminSelfIdentityRoute({ request, response, url, pathname }) {
     if (pathname !== PATH) return false;
     if (request.method !== "POST") return false;
-    const auth = await authMiddleware(request, url, { requireCapability: "jobs:lifecycle" });
+    const auth = await authMiddleware(request, url, { requireCapability: "admin:self-identity" });
     const payload = await readJsonBody(request);
     const body = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
     const edited = await editAdminOurs(stateStore, {

@@ -43,6 +43,7 @@ import {
   isDesignatedJob
 } from "./designated-claimants.js";
 import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
+import { isReservedCanaryJobId } from "./self-identity-registry.js";
 
 export const EXTERNAL_DRAFT_FUNDING_NOTE =
   "No draft or claimable job exists yet; the watcher materializes both only after a matching finalized escrow creation.";
@@ -1423,6 +1424,25 @@ export class ExternalPostingService {
 
 function validateExternalJobDefinition(candidate, config) {
   const definition = cloneJsonObject(requirePlainObject(candidate, "definition"));
+  const reservedCanaryField = ["disposableProof", "canary", "canaryService", "hostedWorkerCanary", "claimantAttribution"]
+    .find((field) => definition[field] !== undefined);
+  if (reservedCanaryField) {
+    throw externalValidationError(
+      "External jobs cannot set a canary tag.",
+      "reserved_canary_field",
+      { field: reservedCanaryField }
+    );
+  }
+  if (isReservedCanaryJobId(definition.id)) {
+    throw externalValidationError(
+      "External jobs cannot use a reserved canary id.",
+      "reserved_canary_job_id"
+    );
+  }
+  if (definition.lineage && typeof definition.lineage === "object" && !Array.isArray(definition.lineage)) {
+    delete definition.lineage.createdBy;
+    delete definition.lineage.canaryService;
+  }
   const unknownFields = Object.keys(definition)
     .filter((field) => !EXTERNAL_DEFINITION_FIELDS.has(field))
     .sort();

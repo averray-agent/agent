@@ -88,6 +88,42 @@ test("createJobsFromImportResult separates created, duplicate, and errored jobs"
   );
 });
 
+test("import cannot set a canary tag or a reserved canary id", async () => {
+  const seen = [];
+  const posted = [];
+  const result = await createJobsFromImportResult({
+    catalogueLaneDiscipline: {
+      async post(job, action) {
+        posted.push(job);
+        return action();
+      }
+    },
+    createOperatorImportedJob(job) {
+      seen.push(job);
+      return { id: job.id };
+    }
+  }, [
+    {
+      id: "imported-plain",
+      disposableProof: true,
+      canary: true,
+      lineage: { createdBy: "operator-canary-service", kind: "note" }
+    },
+    { id: "worker-canary-imported", disposableProof: true }
+  ]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].disposableProof, undefined);
+  assert.equal(seen[0].canary, undefined);
+  assert.equal(seen[0].lineage.createdBy, undefined);
+  assert.equal(seen[0].lineage.kind, "note");
+  assert.equal(posted[0].disposableProof, undefined);
+  assert.deepEqual(result.errors, [{
+    id: "worker-canary-imported",
+    code: "invalid_request",
+    message: "Job id uses a reserved canary prefix."
+  }]);
+});
+
 test("provider import retires keyword-only candidates before they reach the catalog", async () => {
   let created = 0;
   const result = await createJobsFromImportResult({

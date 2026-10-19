@@ -35,7 +35,7 @@ function makeHarness(overrides = {}) {
   return { calls, response, route, stateStore, registry };
 }
 
-test("ours edits ignore unrelated paths and require jobs:lifecycle", async () => {
+test("ours edits ignore unrelated paths and require admin:self-identity", async () => {
   const { calls, response, route } = makeHarness();
   assert.equal(await route({
     request: { method: "POST" }, response, url: new URL("http://localhost/admin/status"), pathname: "/admin/status"
@@ -55,7 +55,7 @@ test("ours edits ignore unrelated paths and require jobs:lifecycle", async () =>
     }),
     (error) => error.name === "AuthorizationError"
   );
-  assert.deepEqual(denied.calls, [["auth", { requireCapability: "jobs:lifecycle" }]]);
+  assert.deepEqual(denied.calls, [["auth", { requireCapability: "admin:self-identity" }]]);
 });
 
 test("an ours edit is stored and applied to the live registry without echoing the wallet", async () => {

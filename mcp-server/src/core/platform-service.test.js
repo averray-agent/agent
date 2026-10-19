@@ -774,6 +774,96 @@ test("createSubJob links the child job to the active parent session", async () =
   assert.equal(subJobs[0].id, "child-job-001");
 });
 
+test("createSubJob cannot mint a canary tag or a reserved canary id", async () => {
+  const service = makePlatformService();
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-canary-guard");
+  const child = await service.createSubJob(session.sessionId, WALLET, {
+    id: "child-job-canary-guard",
+    category: "review",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/review-input",
+    outputSchemaRef: "schema://jobs/pr-review-findings-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    disposableProof: true,
+    canary: true,
+    claimantAttribution: { kind: "hosted_worker_canary", evidence: "wallet_bound_marker_v1" },
+    lineage: { createdBy: "operator-canary-service", note: "caller" }
+  });
+  assert.equal(child.disposableProof, undefined);
+  assert.equal(child.canary, undefined);
+  assert.equal(child.claimantAttribution, undefined);
+  assert.equal(child.lineage.createdBy, WALLET);
+  assert.notEqual(child.lineage.createdBy, "operator-canary-service");
+  assert.equal(child.lineage.note, "caller");
+  await assert.rejects(
+    () => service.createSubJob(session.sessionId, WALLET, {
+      id: "worker-canary-evil",
+      category: "review",
+      tier: "starter",
+      rewardAmount: 1,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      claimTtlSeconds: 1800,
+      retryLimit: 1
+    }),
+    (error) => /reserved canary prefix/u.test(error.message)
+  );
+  assert.equal(service.listJobs().some((job) => job.id === "worker-canary-evil"), false);
+});
+
+test("operator canary creation stamps lineage and import cannot", async () => {
+  const service = makePlatformService();
+  const created = await service.createAdminJob({
+    id: "worker-canary-1786453506586",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 1,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    disposableProof: true,
+    lineage: { createdBy: "caller-supplied", note: "kept" }
+  });
+  assert.equal(created.disposableProof, true);
+  assert.equal(created.lineage.createdBy, "operator-canary-service");
+  assert.equal(created.lineage.note, "kept");
+
+  await assert.rejects(
+    () => service.createOperatorImportedJob({
+      id: "worker-canary-imported",
+      category: "coding",
+      tier: "starter",
+      rewardAmount: 1,
+      rewardAsset: "DOT",
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1
+    }),
+    (error) => /reserved canary prefix/u.test(error.message)
+  );
+  const imported = await service.createOperatorImportedJob({
+    id: "imported-ordinary",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 1,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    disposableProof: true,
+    lineage: { createdBy: "operator-canary-service" }
+  });
+  assert.equal(imported.disposableProof, undefined);
+  assert.equal(imported.lineage?.createdBy, undefined);
+});
+
 test("createAdminJob reserves finite recurring template funding from the poster wallet", async () => {
   const service = makePlatformService();
   let declaredOrigin;
@@ -3272,6 +3362,59 @@ test("external projections strip sponsored-gas and waiver flags even from legacy
   assert.equal(created.source.type, "external");
   assert.equal(created.requiresSponsoredGas, false);
   assert.notEqual(created.onboardingWaiverEligible, true);
+  assert.equal(created.disposableProof, undefined);
+  assert.equal(created.lineage?.createdBy, undefined);
+
+  const stripped = service.createExternalJobProjection({
+    jobId: "external-canary-controls",
+    wallet: WALLET,
+    definition: {
+      category: "coding",
+      tier: "starter",
+      rewardAsset: "DOT",
+      rewardAmount: 5,
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 3600,
+      retryLimit: 1,
+      disposableProof: true,
+      canary: true,
+      lineage: { createdBy: "operator-canary-service", note: "poster" }
+    }
+  }, {
+    fundedAt: "2026-08-08T10:00:00.000Z",
+    txHash: `0x${"cd".repeat(32)}`,
+    blockNumber: "19150001"
+  });
+  assert.equal(stripped.disposableProof, undefined);
+  assert.equal(stripped.canary, undefined);
+  assert.equal(stripped.lineage?.createdBy, undefined);
+  assert.equal(stripped.lineage?.note, "poster");
+  assert.throws(
+    () => service.createExternalJobProjection({
+      jobId: "worker-canary-external",
+      wallet: WALLET,
+      definition: {
+        category: "coding",
+        tier: "starter",
+        rewardAsset: "DOT",
+        rewardAmount: 5,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        claimTtlSeconds: 3600,
+        retryLimit: 1
+      }
+    }, {
+      fundedAt: "2026-08-08T10:00:00.000Z",
+      txHash: `0x${"ef".repeat(32)}`,
+      blockNumber: "19150002"
+    }),
+    (error) => /reserved canary prefix/u.test(error.message)
+  );
 });
 
 test("serving metadata exposes curated provenance without changing the canonical definition", async () => {

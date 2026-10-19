@@ -10,6 +10,11 @@ import {
   loadMaintainerRepoCooldownConfig
 } from "./maintainer-repo-cooldown.js";
 import { readGithubPrSelfMergeStatus } from "./github-claim-guardrails.js";
+import {
+  prepareOperatorCanaryInput,
+  rejectCallerCanaryMint,
+  stampServerCanaryLineage
+} from "./self-identity-registry.js";
 import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
@@ -382,8 +387,9 @@ export class PlatformService {
     }
   }
 
-  createJob(input) {
-    const created = this.jobCatalogService.createJob(input);
+  createJob(input, { trustedCanaryBoundary = false } = {}) {
+    const jobInput = trustedCanaryBoundary ? input : rejectCallerCanaryMint(input);
+    const created = this.jobCatalogService.createJob(jobInput);
     try {
       this.validateJobRewardMinBalance(created);
       return created;
@@ -416,14 +422,18 @@ export class PlatformService {
       blockNumber: String(confirmation.blockNumber)
     };
     const declaredSource = draft.definition?.source;
-    const created = this.createJob({
+    const sanitized = rejectCallerCanaryMint({
       ...draft.definition,
+      id: draft.jobId
+    });
+    const created = this.createJob({
+      ...sanitized,
       // External volume is poster-funded business, not curated onboarding
       // inventory. Keep this enforcement at projection time as a second gate
       // even when a legacy or hand-built quote carries unsafe flags.
       requiresSponsoredGas: false,
       onboardingWaiverEligible: false,
-      id: draft.jobId,
+      id: sanitized.id,
       source: {
         type: "external",
         poster,
@@ -459,10 +469,11 @@ export class PlatformService {
   async createAdminJob(input, { posterWallet = undefined } = {}) {
     assertIngestedVerifierClassReward(input, this.verifierClassRewards);
     assertIngestedCatalogVerifierCanReject(input);
-    const jobInput = await this.withRegisteredExternalSchema(input);
+    const jobInput = await this.withRegisteredExternalSchema(prepareOperatorCanaryInput(input));
     const action = async () => {
       this.catalogueMutations.assertCanIngest(jobInput);
-      const created = this.createJob(jobInput);
+      const created = this.createJob(jobInput, { trustedCanaryBoundary: true });
+      stampServerCanaryLineage(created);
       try {
         await this.reserveRecurringTemplateFunding(created, posterWallet);
         await this.catalogueMutations.persistOperator(created);
@@ -478,8 +489,9 @@ export class PlatformService {
   }
 
   async createOperatorImportedJob(input) {
-    this.catalogueMutations.assertCanIngest(input);
-    const created = this.createJob(input);
+    const safe = rejectCallerCanaryMint(input);
+    this.catalogueMutations.assertCanIngest(safe);
+    const created = this.createJob(safe, { trustedCanaryBoundary: true });
     try {
       await this.catalogueMutations.persistOperator(created);
       return created;
@@ -1884,12 +1896,13 @@ export class PlatformService {
     }
 
     const createdAt = new Date().toISOString();
+    const safeInput = rejectCallerCanaryMint(input);
     const child = this.createJob({
-      ...input,
+      ...safeInput,
       rewardAsset,
       parentSessionId,
       lineage: {
-        ...(typeof input?.lineage === "object" && input.lineage && !Array.isArray(input.lineage) ? input.lineage : {}),
+        ...(typeof safeInput?.lineage === "object" && safeInput.lineage && !Array.isArray(safeInput.lineage) ? safeInput.lineage : {}),
         kind: "sub_job",
         parentSessionId,
         parentJobId: parentJob.id,
@@ -1905,7 +1918,7 @@ export class PlatformService {
           remainingAfterAmount: Math.max(policy.budgetAmount - nextUsedBudgetAmount, 0)
         }
       }
-    });
+    }, { trustedCanaryBoundary: true });
     await this.reserveForJob(wallet, rewardAsset, rewardAmount);
     child.lineage = {
       ...(child.lineage ?? {}),

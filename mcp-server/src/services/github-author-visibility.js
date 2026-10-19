@@ -57,6 +57,10 @@ export async function readGithubAuthors(stateStore, {
     if (claim) claimRows.push(claim);
     const job = session.jobSnapshot?.definition;
     if ((job?.verifierConfig?.handler ?? job?.verifierMode) !== "github_pr") continue;
+    // Every external author count excludes registry ours. Burst rows stay so
+    // the guardrail can count those wallets as ours rather than claimants.
+    const identity = selfIdentityRegistry?.classify?.({ wallet: session.wallet, session });
+    if (identity?.actor === "self") continue;
     githubSessions++;
     const wallet = String(session.wallet ?? "").toLowerCase();
     if (/^0x[\da-f]{40}$/u.test(wallet)) wallets.add(wallet);

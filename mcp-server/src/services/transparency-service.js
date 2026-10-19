@@ -419,14 +419,14 @@ export class TransparencyService {
         })
       },
       githubAuthors: {
-        label: flow.githubAuthors?.label ?? "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions.",
+        label: flow.githubAuthors?.label ?? "GitHub accounts with a verified claimant footer, not unique humans; registry ours are excluded; remaining wallets include unattributed external sessions.",
         ...Object.fromEntries(Object.entries({ distinctAuthors: "authors", distinctWallets: "wallets", unattributedSessions: "sessions" })
           .map(([name, unit]) => [name, countField({
             value: flow.githubAuthors?.[name] ?? null, unit,
             readAtMs: Date.parse(flow.githubAuthors?.asOf ?? ""),
             source: flow.githubAuthors?.source ?? "backend_state_store",
             proof: flow.githubAuthors
-              ? "retained github_pr sessions; author attribution requires verified GitHub author and matched claimant footer binding; unattributed sessions retained"
+              ? "retained external github_pr sessions; registry ours excluded; author attribution requires verified GitHub author and matched claimant footer binding; unattributed external sessions retained"
               : "github_author_read_unavailable"
           })]))
       },
@@ -546,13 +546,13 @@ export class TransparencyService {
           unit: "jobs",
           readAtMs,
           source: "backend_state_store sessions classified by the shared self-identity registry",
-          proof: "session.wallet + durable claimantAttribution + configured operator identity registry"
+          proof: "shared self-identity registry: env allowlists, the admin ours list, and a valid wallet-bound canary marker. A job id, disposableProof flag, or caller lineage is not identity. Invalid markers stay external. Ours are excluded from external counts."
         }
       ]));
       const externalWallets24h = {
         value: workerCounts.unknown ? null : new Set(externalSessions.map((session) => session.wallet.toLowerCase())).size,
         unit: "wallets", readAtMs, source: "settled jobs in last 24h + shared self-identity registry",
-        proof: workerCounts.unknown ? "claimant_identity_unavailable" : "distinct external session.wallet, case-insensitive; not a job count"
+        proof: workerCounts.unknown ? "claimant_identity_unavailable" : "distinct external session.wallet, case-insensitive; registry ours excluded; a canary job tag alone is not identity"
       };
       const externalAuthors = await readGithubAuthors(this.stateStore, { sessions: externalSessions, now: new Date(nowMs) }).catch(() => null);
       const unattributed = externalAuthors
@@ -593,7 +593,7 @@ export class TransparencyService {
         distinctAuthors: authors.distinctAuthors, distinctWallets: authors.distinctWallets,
         unattributedSessions: authors.unattributedSessions, githubSessions: authors.githubSessions,
         source: authors.source, asOf: authors.asOf,
-        label: "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions."
+        label: "GitHub accounts with a verified claimant footer, not unique humans; registry ours are excluded; remaining wallets include unattributed external sessions."
       } : undefined;
       return { windows, composition, workers, posterFees, participation, retained, githubAuthors, externalWallets24h, externalAuthors24h };
     } catch (error) {
