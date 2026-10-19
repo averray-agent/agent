@@ -132,7 +132,9 @@ test("legal pages: final public wording, truthful Verify boundaries and fixed op
   assert.match(privacyBody, /Hosting is with OVH in Lille, France \(EU\)/u);
   assert.match(privacyBody, /Logs are size-capped per service and the oldest entries are deleted automatically when the cap is reached; they are used for security and abuse prevention, not profiling\./u);
   assert.doesNotMatch(privacyBody, /backup|short schedule|logs rotate/iu);
-  assert.doesNotMatch(termsBody, /\bbackup\b/iu);
+  assert.doesNotMatch(termsBody, /\bbackups?\b/iu);
+  assert.doesNotMatch(privacyBody, /\blogs?\b[^.!?]*(?:\b(?:hours?|days?|weeks?|months?|years?)\b|\b(?:daily|weekly|monthly|annually|schedule)\b)/iu);
+  assert.doesNotMatch(privacyBody, /OVH in the EU|OVH, EU data center/iu);
   for (const path of ["/imprint/", "/pricing/"]) assert.ok(terms.querySelector(`a[href="${path}"]`));
   assert.ok(privacy.querySelector('[data-verify-privacy] a[href="/terms/"]'));
 });

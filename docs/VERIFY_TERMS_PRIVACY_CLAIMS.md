@@ -10,6 +10,11 @@ build receives the same date resolved on the host. Coinbase CDP is excluded;
 that disclosure belongs to the future x402 poster-rail PR. Workflow language is confined
 to this review evidence and the PR, not the public pages or discovery copy.
 
+Rebased onto `origin/main` at `4c4b4e6b` on 2026-10-19, preserving the operator
+facts supplied on 2026-10-18. Receipt fix #1501 and per-service log caps #1502
+are merged and deployed, as confirmed by the operator. Hosting is with OVH in
+Lille, France (EU), and the Verify runner is at OVH in France (EU).
+
 ## Credential boundary
 
 `verify-routes.js` extracts the bearer value from
@@ -43,7 +48,7 @@ requests and the terms redirect. No live payment or external target is used.
 No credential persistence leak was found in these paths. The integration test did
 find a receipt-signing defect: decisive deterministic verdicts may omit `reason`,
 but `buildVerifyReceipt` retained `reason: undefined`, rejected by the strict JWS
-canonicalizer. The fix is isolated in PR #1501 and must merge/deploy first.
+canonicalizer. The fix landed in PR #1501 (`a341bd9c`) and is live.
 This terms PR is based on that fix and does not change the receipt builder.
 The original ten targeted mutations are recorded in
 [evidence/verify-terms-privacy/credential-mutations.json](evidence/verify-terms-privacy/credential-mutations.json).
@@ -79,8 +84,8 @@ promise.
 | Run profile, target, inputs, verdict, execution summary and signed receipt processed (privacy) | `VerificationRunService.createRun` / `finalizeExecution`, `McpProbeCoordinator.execute`, and `buildVerifyReceipt`. |
 | Legal basis: requested service and legitimate interest (privacy) | Operator's stated processing purposes in the supplied packet; this is a legal/policy statement, not something code can establish. |
 | Runs/receipts indefinitely in the live database; payment records 10 years (privacy) | `state-store.js:RESERVE_VERIFICATION_RUN_SCRIPT` writes run and private authorization without expiry; `RedisStateStore.putWorkReceiptDocument` writes receipts without expiry; production Redis uses AOF and a host-mounted data volume in `deploy/docker-compose.mainnet.yml`. Only replay indexes/leases expire. The ten-year business-record retention is an operator commitment; there is no ten-year deletion job or archival SLA proved by this PR. |
-| Logs are size-capped per service; oldest entries are deleted at the cap; security and abuse prevention, not profiling (privacy) | The published sentence is the operator policy. It states no time-based log retention. Size caps are the json-file logging anchor on every service in `deploy/docker-compose.mainnet.yml`, which lands in #1502 and must merge before this PR. `core/logger.js` and `server.js` describe the emitted technical data. |
-| Hosting is with OVH in Lille, France (EU); the Verify runner is at OVH in France (EU) (privacy) | Operator-supplied hosting location in the privacy page. Compose defines the server workload, not provider or geography. |
+| Logs are size-capped per service; oldest entries are deleted at the cap; security and abuse prevention, not profiling (privacy) | The published sentence is the operator policy. It states no time-based log retention. Size caps are the json-file logging anchor on every service in `deploy/docker-compose.mainnet.yml`, landed in #1502 (`4c4b4e6b`): `json-file`, `max-size: 10m`, `max-file: 5`. `scripts/ops/mainnet-compose-logging.test.mjs` parses the Compose file and requires that configuration on every service. `core/logger.js` and `server.js` describe the emitted technical data. |
+| Hosting is with OVH in Lille, France (EU); the Verify runner is at OVH in France (EU) (privacy) | Operator-supplied hosting location confirmed on 2026-10-18 in the privacy page. Compose defines the server workload, not provider or geography. |
 | Base public RPC and Base (Coinbase) as sub-processor (privacy) | `deploy/backend.mainnet.env.template` sets `BASE_RPC_URL=https://mainnet.base.org`; `createConfiguredX402VerificationPaymentGate` builds the Base providers; `createBaseSubmitter` connects the capture signer. Provider identity is supplied by the packet. |
 | AWS KMS in eu-central-2 signs capture (privacy) | `createBaseSubmitter` selects `KmsSigner` for `SIGNER_BACKEND=kms`; `blockchain/kms-signer.js:signTransaction`; production template selects KMS, with region/key resolved from operator secret references. Exact deployed region is an operator-controlled setting; this PR does not access production secrets. |
 
