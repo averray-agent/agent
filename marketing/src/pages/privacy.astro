@@ -4,13 +4,8 @@ import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
 
-/**
- * Privacy policy. Written to be honest about what the platform actually
- * processes — including the fact that on-chain records are public and
- * permanent by design. Bracketed placeholders are filled by the operator
- * before this page ships; the build intentionally does not hide them.
- */
-const updated = "2026-07-26";
+import { legalRevisionDate } from "../lib/legal-revision-date.mjs";
+const updated = legalRevisionDate();
 ---
 
 <BaseLayout
@@ -51,7 +46,7 @@ const updated = "2026-07-26";
         <li>
           <strong>Server logs.</strong> Our servers record IP addresses and user agents in
           technical logs for security and abuse prevention (rate limiting, incident
-          response). Logs rotate on a short schedule and are not used for profiling.
+          response). Logs are size-capped per service and the oldest entries are deleted automatically when the cap is reached; they are used for security and abuse prevention, not profiling.
           Legal basis: legitimate interest in operating the service securely.
         </li>
         <li>
@@ -68,11 +63,13 @@ const updated = "2026-07-26";
 
       <h2 class="section__title">Where it runs</h2>
       <p>
-        Hosting is in the European Union (OVH, EU data center); signing
+        Hosting is with OVH in Lille, France (EU). Signing
         infrastructure uses AWS KMS in eu-central-2 (Zurich) with eu-west-1 replication.
         Sub-processors: OVH (servers), Amazon Web Services (key
         management), Resend (transactional email), GitHub (public repository content),
-        Slack (internal operational alerts).
+        Slack (internal operational alerts), Base (Coinbase) (Base RPC for payment reads
+        and transaction broadcast). Verify runs on our servers at OVH in France (EU);
+        Verify payment reads and capture use the Base public RPC (mainnet.base.org).
       </p>
 
       <h2 class="section__title">The blockchain limit, stated honestly</h2>
@@ -84,6 +81,42 @@ const updated = "2026-07-26";
         Off-chain data we control (logs, database records that are not part of the public
         record) is deletable on request where the law requires it.
       </p>
+
+      <section data-verify-privacy aria-labelledby="verify-privacy-heading">
+        <h2 class="section__title" id="verify-privacy-heading">Averray Verify (paid verification on Base)</h2>
+        <p>When you buy a Verify run, we process:</p>
+        <h3>Payment data</h3>
+        <ul class="checklist">
+          <li>The Base wallet address that signs the payment.</li>
+          <li>The signed x402 / EIP-3009 authorization (amount, nonce and validity window).</li>
+          <li>The resulting on-chain transaction.</li>
+        </ul>
+        <p>On-chain transfers on Base are public and permanent, and the same limit described above for Polkadot applies.</p>
+        <h3>Run data</h3>
+        <ul class="checklist">
+          <li>The profile you chose.</li>
+          <li>Your target (for example an MCP endpoint URL or a repository reference) and your inputs (for example a patch or a structured output).</li>
+          <li>The verdict, the execution summary and the signed receipt.</li>
+        </ul>
+        <p><strong>Run records and receipts are publicly readable by run id.</strong> This includes the paying wallet address and the payment transaction. Don't put personal data in them.</p>
+        <h3>A scoped test credential</h3>
+        <p>If you send one in the <code>verification-target-authorization</code> header, it is used only to run your target for that run. It is not stored in the run record or the logs; it is kept in memory for the run only.</p>
+        <h3>Legal basis</h3>
+        <p>Performance of the run you request and pay for, and our legitimate interest in keeping billing and receipts verifiable.</p>
+        <h3>Retention</h3>
+        <ul class="checklist">
+          <li>Run records and receipts are kept indefinitely in our live database, so that receipts stay verifiable.</li>
+          <li>Payment records for 10 years, the Swiss retention period for business records.</li>
+          <li>Server logs follow the rotation described above.</li>
+        </ul>
+        <h3>Where it runs</h3>
+        <ul class="checklist">
+          <li>The runner is at OVH in France (EU).</li>
+          <li>Payments are read from and captured on Base through the Base public RPC (<code>mainnet.base.org</code>, operated by Base (Coinbase)).</li>
+          <li>The capture transaction is signed by our key in AWS KMS (eu-central-2).</li>
+        </ul>
+        <p><a href="/terms/">Averray Verify terms of use</a></p>
+      </section>
 
       <h2 class="section__title">Your rights</h2>
       <p>

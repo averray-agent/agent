@@ -955,9 +955,16 @@ build_site() {
     return
   fi
 
+  # The Node image need not include Git. Resolve the publishing merge date on
+  # the host and pass only that public build metadata into the site build.
+  local legal_revision_date
+  legal_revision_date=$(TZ=UTC git -C "$APP_ROOT" log --first-parent -1 \
+    --date=format-local:%Y-%m-%d --format=%cd -- \
+    marketing/src/pages/terms.astro marketing/src/pages/privacy.astro)
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     -e npm_config_cache=/tmp/.npm \
+    -e VERIFY_LEGAL_REVISION_DATE="$legal_revision_date" \
     -v "$APP_ROOT:/workspace" \
     -w /workspace \
     "$SITE_NODE_IMAGE" \
@@ -996,7 +1003,7 @@ site_content_hash() {
 verify_site_served() {
   local base_url="${PUBLIC_SITE_URL%/}"
   local entry
-  for entry in "index.html /" "pricing/index.html /pricing/" "llms.txt /llms.txt" "console-stream.js /console-stream.js" "transparency/index.html /transparency/" "transparency-reader.js /transparency-reader.js" "verify/index.html /verify/" "verify-listing.json /verify-listing.json" "why-two-chains/index.html /why-two-chains/" "verify-reader.js /verify-reader.js" "proof-to-pay/index.html /proof-to-pay/" "pool/index.html /pool/" "pool-reader.js /pool-reader.js" "receipts/index.html /receipts/" "receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/index.html /receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/" "receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/index.html /receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/"; do
+  for entry in "index.html /" "pricing/index.html /pricing/" "terms/index.html /terms/" "privacy/index.html /privacy/" "llms.txt /llms.txt" "console-stream.js /console-stream.js" "transparency/index.html /transparency/" "transparency-reader.js /transparency-reader.js" "verify/index.html /verify/" "verify-listing.json /verify-listing.json" "why-two-chains/index.html /why-two-chains/" "verify-reader.js /verify-reader.js" "proof-to-pay/index.html /proof-to-pay/" "pool/index.html /pool/" "pool-reader.js /pool-reader.js" "receipts/index.html /receipts/" "receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/index.html /receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/" "receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/index.html /receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/"; do
     local file="${entry%% *}"
     local url_path="${entry#* }"
     local local_file="$APP_ROOT/site/$file"

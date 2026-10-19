@@ -1,0 +1,37 @@
+{
+  "measuredAt": "2026-10-19T07:34:56.687466+00:00",
+  "base": "4c4b4e6b9fe2eaeb36af1a29d4b48e7fc036e242",
+  "method": "One rendered-page mutation at a time; focused site guard; restored after every test; syntax failures excluded.",
+  "results": [
+    {
+      "mutant": "wrong-hosting-city",
+      "file": "marketing/src/pages/privacy.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "wrong-runner-country",
+      "file": "marketing/src/pages/privacy.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "time-based-log-retention",
+      "file": "marketing/src/pages/privacy.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "privacy-extra-storage-claim",
+      "file": "marketing/src/pages/privacy.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "terms-extra-storage-claim",
+      "file": "marketing/src/pages/terms.astro",
+      "result": "RED"
+    },
+    {
+      "mutant": "unqualified-indefinite-retention",
+      "file": "marketing/src/pages/privacy.astro",
+      "result": "RED"
+    }
+  ]
+}
