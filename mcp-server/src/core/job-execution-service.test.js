@@ -1521,6 +1521,8 @@ test("claimJob finalizes the chain timeout before reclaiming an unsubmitted sing
   const stateStore = new MemoryStateStore();
   const job = makeJob({ claimTtlSeconds: 60, retryLimit: 1 });
   let chainState = 2;
+  let chainWorker = WALLET;
+  let chainExpiry = Date.parse("2026-05-01T10:01:00.000Z") / 1000;
   let timeoutCalls = 0;
   let claimCalls = 0;
   const blockchainGateway = {
@@ -1549,14 +1551,16 @@ test("claimJob finalizes the chain timeout before reclaiming an unsubmitted sing
     async getJob() {
       return {
         state: chainState,
-        worker: chainState === 2 ? WALLET_2 : undefined,
-        claimExpiry: Date.parse("2030-05-01T12:00:00.000Z") / 1000,
+        worker: chainState === 2 ? chainWorker : undefined,
+        claimExpiry: chainExpiry,
         specHash: buildJobSnapshot(job).specHash
       };
     },
     async handleClaimTimeout(jobId) {
       assert.equal(jobId, job.id);
       assert.equal(chainState, 2);
+      assert.equal(chainWorker, WALLET);
+      assert.ok(chainExpiry * 1000 < Date.now());
       timeoutCalls += 1;
       chainState = 1;
     },
@@ -1568,6 +1572,8 @@ test("claimJob finalizes the chain timeout before reclaiming an unsubmitted sing
       assert.equal(chainState, 1);
       claimCalls += 1;
       chainState = 2;
+      chainWorker = wallet;
+      chainExpiry = Math.floor(Date.now() / 1000) + 3600;
     }
   };
   const service = new JobExecutionService(stateStore, blockchainGateway, () => job);
