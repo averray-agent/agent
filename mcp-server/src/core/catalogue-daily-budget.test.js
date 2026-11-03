@@ -83,14 +83,22 @@ test("zero global budget refuses catalogue while an external claim still passes"
   assert.equal(external.applies, false);
 });
 
-test("global rolling exhaustion reports the oldest claim age-out while external work bypasses it", async () => {
+test("configured 5 USDC rolling budget refuses excess, accepts the boundary, and exempts external work", async () => {
   const stateStore = new MemoryStateStore();
   await putClaim(stateStore, {
     id: "global-oldest",
     claimedAt: "2026-08-12T13:00:00.000Z",
-    candidate: { reservedRewardUsdc: 0.75, brokeredGasUsdc: 0, totalUsdc: 0.75 }
+    candidate: { reservedRewardUsdc: 4.75, brokeredGasUsdc: 0, totalUsdc: 4.75 }
   });
-  const budget = policy(stateStore, 1_000_000);
+  const budget = policy(stateStore, loadCatalogueDailyBudgetConfig({
+    WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW: "5000000"
+  }).budgetRaw);
+  const boundary = await budget.evaluate({
+    job: catalogueJob(),
+    workerExposure: { candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0, totalUsdc: 0.25 } }
+  });
+  assert.equal(boundary.eligible, true);
+  assert.equal(boundary.projectedCatalogueExposureRaw, "5000000");
 
   const refused = await budget.evaluate({
     job: catalogueJob(),
@@ -104,7 +112,9 @@ test("global rolling exhaustion reports the oldest claim age-out while external 
   assert.equal(refused.eligible, false);
   assert.equal(refused.reason, CATALOGUE_DAILY_BUDGET_EXHAUSTED_REASON);
   assert.equal(refused.retryAfter, "2026-08-13T13:00:00.000Z");
-  assert.equal(refused.catalogueDailyBudgetUsedRaw, "750000");
+  assert.equal(refused.catalogueDailyBudgetUsedRaw, "4750000");
+  assert.equal(refused.projectedCatalogueExposureRaw, "5059000");
+  assert.equal(refused.catalogueDailyBudgetRaw, "5000000");
   assert.equal(external.eligible, true);
   assert.equal(external.applies, false);
 });

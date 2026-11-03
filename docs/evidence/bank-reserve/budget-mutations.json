@@ -1,0 +1,22 @@
+[
+  {
+    "mutation": "source budget drift",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "rendered budget drift",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove cap",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove external exemption",
+    "result": "RED",
+    "exitCode": 1
+  }
+]
