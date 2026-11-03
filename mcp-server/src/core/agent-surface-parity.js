@@ -168,6 +168,7 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
       ["GET", "/admin/sessions"],
       ["GET", "/admin/ops/overnight-ledger"],
       ["GET", "/admin/ops/bank-moves"],
+      ["GET", "/admin/ops/reserve-breakdown"],
       ["GET", "/admin/ops/topup-destinations"],
       ["GET", "/admin/arrivals/timeline"],
       ["GET", "/admin/arrivals/sessions"],

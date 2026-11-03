@@ -168,6 +168,8 @@ export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",
   "function DISPUTE_WINDOW() view returns (uint256)",
+  "function MIN_OPEN_FOR_CANCEL() view returns (uint256)",
+  "function createdAt(bytes32 jobId) view returns (uint256)",
   "function protocolFeeBps() view returns (uint16)",
   "function posterFeeBps() view returns (uint16)",
   "function posterFeeFloorRaw() view returns (uint256)",

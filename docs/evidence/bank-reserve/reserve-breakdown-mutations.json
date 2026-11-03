@@ -1,0 +1,62 @@
+[
+  {
+    "mutation": "omit protocol fee from sum",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "hide reconciliation discrepancy",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove poster guard",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove v3 guard",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove authorization",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove active-session guard",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove dispute-window guard",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "remove open cancellation floor",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "allow Submitted sweeps",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "allow Disputed sweeps",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "unknown total becomes zero",
+    "result": "RED",
+    "exitCode": 1
+  },
+  {
+    "mutation": "unpin snapshot reads",
+    "result": "RED",
+    "exitCode": 1
+  }
+]

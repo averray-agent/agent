@@ -1,3 +1,5 @@
+import { ReserveBreakdownService, ReserveChainReader } from "../../services/reserve-breakdown.js";
+import { createAdminReserveRoutes } from "./admin-reserve-routes.js";
 import { createServer } from "node:http";
 import { createPlatformRuntime } from "../../services/bootstrap.js";
 import { assertMutationBackendAvailable } from "../../core/mutation-backend.js";
@@ -471,6 +473,13 @@ const handleAdminYieldSubsidyRoute = createAdminYieldSubsidyRoutes({
   respond,
   yieldAttributionService
 });
+
+const reserveBreakdown = new ReserveBreakdownService({
+  reader: new ReserveChainReader(gateway), stateStore, catalog: service.jobCatalogService,
+  toJobId: (jobId) => gateway.toJobId(jobId),
+  openMaxAgeDays: Number(process.env.RESERVE_SWEEP_OPEN_MAX_AGE_DAYS ?? 14)
+});
+const handleAdminReserveRoute = createAdminReserveRoutes({ authMiddleware, reserveBreakdown, respond });
 
 const overnightLedger = new OvernightLedgerService({
   stateStore,
@@ -1262,6 +1271,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (await handleAdminReserveRoute({ request, response, url, pathname })) return;
     if (await handleAdminOvernightLedgerRoute({ request, response, url, pathname })) {
       return;
     }
