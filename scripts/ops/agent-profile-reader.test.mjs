@@ -24,6 +24,7 @@ const ELEMENT_IDS = [
   "profile-loading-json-url",
   "profile-title",
   "profile-tier",
+  "profile-personhood",
   "profile-identity",
   "profile-skill",
   "profile-reliability",
@@ -59,7 +60,7 @@ const ELEMENT_IDS = [
 function createElement(id) {
   return {
     attributes: new Map(),
-    hidden: id === "profile-content" || id === "profile-tier" || id === "profile-identity",
+    hidden: id === "profile-content" || id === "profile-tier" || id === "profile-personhood" || id === "profile-identity",
     id,
     innerHTML: "",
     textContent: "",
@@ -129,19 +130,25 @@ async function renderFixture(profile) {
 }
 
 test("real tester-wallet fixture renders the API platform tier, category unlocks, badge, and stats", async () => {
-  let requestedUrl;
+  const requestedUrls = [];
   const { context, elements } = createHarness();
   context.AverrayReaderFetch = {
     async readJsonWithRetry(url) {
-      requestedUrl = url;
+      requestedUrls.push(url);
       return profileFixture;
     }
   };
 
   vm.runInContext(agentSource, context, { filename: "agent.js" });
-  await waitFor(() => elements.get("profile-loading").hidden, "fixture profile should finish rendering");
+  await waitFor(
+    () => elements.get("profile-loading").hidden && requestedUrls.length >= 2,
+    "fixture profile should finish rendering"
+  );
 
-  assert.equal(requestedUrl, PROFILE_URL);
+  assert.deepEqual(requestedUrls, [
+    PROFILE_URL,
+    `https://api.averray.com/people/personhood/${TESTER_WALLET}`
+  ]);
   assert.equal(elements.get("profile-title").textContent, "Agent 0x97450b…4b5c");
   assert.equal(elements.get("profile-tier").textContent, "Reputation tier · journeyman");
   assert.equal(elements.get("profile-tier").hidden, false);
@@ -159,6 +166,41 @@ test("real tester-wallet fixture renders the API platform tier, category unlocks
   assert.match(elements.get("profile-badges").innerHTML, /wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r21/u);
   assert.match(elements.get("profile-badges").innerHTML, /wikipedia · level 1/u);
   assert.equal(elements.get("profile-json-url").attributes.get("href"), PROFILE_URL);
+});
+
+test("a pinned lite read shows the username and soft-signal pill", async () => {
+  const { context, elements } = createHarness();
+  context.AverrayReaderFetch = {
+    async readJsonWithRetry(url) {
+      if (String(url).includes("/people/personhood/")) {
+        return {
+          available: true,
+          tier: "lite",
+          displayName: "cedar.07",
+          at: { blockHash: `0x${"11".repeat(32)}`, blockNumber: 16, chain: "fixture:paseo-individuality" },
+          line: {
+            text: "cedar.07",
+            pill: "lite",
+            tooltip: "Lite is an attested Polkadot App install or another governance-authorized attestation. Soft signal only. It does not provide hard sybil resistance."
+          }
+        };
+      }
+      return profileFixture;
+    }
+  };
+  vm.runInContext(agentSource, context, { filename: "agent.js" });
+  await waitFor(() => elements.get("profile-personhood").hidden === false, "personhood pill should render");
+  assert.equal(elements.get("profile-title").textContent, "cedar.07");
+  assert.equal(elements.get("profile-personhood").textContent, "lite");
+  assert.match(elements.get("profile-personhood").attributes.get("title"), /governance-authorized attestation/u);
+  assert.doesNotMatch(elements.get("profile-personhood").attributes.get("title"), /unique human|sybil-proof/iu);
+});
+
+test("no personhood name keeps the truncated address and hides the pill", async () => {
+  const elements = await renderFixture(profileFixture);
+  assert.equal(elements.get("profile-title").textContent, "Agent 0x97450b…4b5c");
+  assert.equal(elements.get("profile-personhood").hidden, true);
+  assert.equal(elements.get("profile-personhood").textContent, "");
 });
 
 test("synthetic fixture is labeled as operator-run and never presented as external demand", async () => {

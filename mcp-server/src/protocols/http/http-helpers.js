@@ -257,6 +257,8 @@ export function metricPathLabel(pathname) {
   if (pathname.startsWith("/badges/") && pathname.endsWith("/run")) return "/badges/:sessionId/run";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
   if (/^\/jobs\/[^/]+\/estimate$/u.test(pathname)) return "/jobs/:id/estimate";
+  if (pathname === "/people/personhood") return "/people/personhood";
+  if (pathname.startsWith("/people/personhood/")) return "/people/personhood/:wallet";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
   if (pathname.startsWith("/shares/")) return "/shares/:token";
   return "other";

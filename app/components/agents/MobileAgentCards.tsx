@@ -1,5 +1,7 @@
+import { PersonhoodPill } from "@/components/agents/PersonhoodPill";
 import { TierChip } from "@/components/agents/TierChip";
 import type { AgentRecord } from "@/components/agents/types";
+import { personhoodFor, personhoodLineText } from "@/lib/agents/personhood-line";
 import { cn } from "@/lib/utils/cn";
 
 const STATE_LABEL: Record<AgentRecord["state"], string> = {
@@ -16,10 +18,12 @@ export function MobileAgentCards({
   agents,
   selectedHandle,
   onSelect,
+  personhood,
 }: {
   agents: AgentRecord[];
   selectedHandle: string | null;
   onSelect: (agent: AgentRecord) => void;
+  personhood?: Record<string, unknown>;
 }) {
   return (
     <section className="min-[1080px]:hidden" data-mobile-layout="agents" aria-labelledby="mobile-agents-title">
@@ -31,6 +35,7 @@ export function MobileAgentCards({
         {agents.map((agent) => {
           const selected = selectedHandle === agent.handle;
           const warning = agent.state === "disputed" || agent.state === "slashed";
+          const signal = personhoodFor(personhood, agent.walletFull);
           return (
             <button
               key={agent.handle}
@@ -44,7 +49,12 @@ export function MobileAgentCards({
               <span className="flex items-start justify-between gap-3">
                 <span className="min-w-0">
                   <span className="block truncate text-base font-bold text-[var(--avy-ink)]">{agent.handle}</span>
-                  <span className="mt-1 block truncate font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">{agent.wallet}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="truncate font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+                      {personhoodLineText(signal, agent.wallet)}
+                    </span>
+                    <PersonhoodPill read={signal} />
+                  </span>
                 </span>
                 <TierChip tier={agent.tier} className="shrink-0" />
               </span>

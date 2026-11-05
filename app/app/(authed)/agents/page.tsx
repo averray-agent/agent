@@ -11,12 +11,14 @@ import { AgentDirectoryTable } from "@/components/agents/AgentDirectoryTable";
 import { AgentComparisonDialog } from "@/components/agents/AgentComparisonDialog";
 import { AgentTierLegend } from "@/components/agents/AgentTierLegend";
 import { AgentDrawerBody } from "@/components/agents/AgentDrawerBody";
+import { PersonhoodPill } from "@/components/agents/PersonhoodPill";
 import { TierChip } from "@/components/agents/TierChip";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
 import { BADGES } from "@/components/agents/types";
 import { extractAgent, extractAgents } from "@/lib/api/agent-adapters";
 import { matchesAgentStatusFilter } from "@/lib/api/agent-roster-truth.js";
-import { useAgent, useAgents } from "@/lib/api/hooks";
+import { useAgent, useAgents, usePeopleLite } from "@/lib/api/hooks";
+import { indexPersonhood, personhoodFor } from "@/lib/agents/personhood-line";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { MobileAgentCards } from "@/components/agents/MobileAgentCards";
 import { profileReadFailure } from "@/lib/agents/profile-read-state.js";
@@ -37,6 +39,15 @@ export default function AgentsPage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const liveAgents = useMemo(() => extractAgents(agentsRequest.data), [agentsRequest.data]);
   const agents = liveAgents;
+  const personhoodWallets = useMemo(
+    () => agents.map((agent) => agent.walletFull),
+    [agents]
+  );
+  const personhoodRequest = usePeopleLite(personhoodWallets);
+  const personhood = useMemo(
+    () => indexPersonhood(personhoodRequest.data),
+    [personhoodRequest.data]
+  );
   const openAgentFromList = openHandle
     ? agents.find((a) => a.handle === openHandle) ?? null
     : null;
@@ -55,13 +66,14 @@ export default function AgentsPage() {
           .map((b) => BADGES[b]?.name ?? "")
           .join(" ")
           .toLowerCase();
+        const signal = personhoodFor(personhood, a.walletFull);
         const blob =
-          `${a.handle} ${a.wallet} ${a.walletFull} ${a.specialty} ${badgeText} ${a.activity.msg}`.toLowerCase();
+          `${a.handle} ${a.wallet} ${a.walletFull} ${signal?.line?.text ?? ""} ${a.specialty} ${badgeText} ${a.activity.msg}`.toLowerCase();
         if (!blob.includes(q)) return false;
       }
       return true;
     });
-  }, [agents, filter]);
+  }, [agents, filter, personhood]);
 
   const COMPARE_MAX = 3;
   const comparingSet = useMemo(() => new Set(comparingHandles), [comparingHandles]);
@@ -151,6 +163,7 @@ export default function AgentsPage() {
         agents={filtered}
         selectedHandle={openHandle}
         onSelect={openAgentDrawer}
+        personhood={personhood}
       />
       <div className="hidden min-[1080px]:block">
         <AgentDirectoryTable
@@ -161,6 +174,7 @@ export default function AgentsPage() {
           comparing={comparingSet}
           onToggleCompare={toggleCompare}
           compareFull={comparingAgents.length >= COMPARE_MAX}
+          personhood={personhood}
         />
       </div>
 
@@ -199,6 +213,7 @@ export default function AgentsPage() {
                 style={{ letterSpacing: 0 }}
               >
                 <TierChip tier={openAgent.tier} />
+                <PersonhoodPill read={personhoodFor(personhood, openAgent.walletFull)} />
                 <span>
                   score{" "}
                   <b className="font-semibold text-[var(--avy-ink)]">{openAgent.score}</b>
@@ -221,7 +236,12 @@ export default function AgentsPage() {
               <button type="button" className="underline" onClick={() => void agentDetail.mutate()}>Retry profile</button>
             ) : null}
           </div>
-        ) : openAgent ? <AgentDrawerBody agent={openAgent} /> : null}
+        ) : openAgent ? (
+          <AgentDrawerBody
+            agent={openAgent}
+            personhood={personhoodFor(personhood, openAgent.walletFull)}
+          />
+        ) : null}
       </DetailDrawer>
 
       <AgentComparisonDialog

@@ -72,6 +72,7 @@ import { createOperatorActivityFeed } from "./operator-activity-feed.js";
 import { createPaymentRoutes, resolvePaymentRouteConfig } from "./payment-routes.js";
 import { createPolicyRoutes } from "./policy-routes.js";
 import { createPosterReviewRoutes } from "./poster-review-routes.js";
+import { createPeopleLiteRoutes } from "./people-lite-routes.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 import { createSchemaRoutes } from "./schema-routes.js";
@@ -84,6 +85,7 @@ import { createVerifyRoutes } from "./verify-routes.js";
 import { withVerifyBilling } from "../../core/verify-product-copy.js";
 import { createWorkerRoutes } from "./worker-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
+import { peopleLiteReaderFromEnv } from "../../services/people-lite-reader.js";
 import { createMcpRoute, MCP_CORS_HEADERS } from "../mcp/handler.js";
 import { createMcpToolExecutor, createMcpTools } from "../mcp/tools.js";
 import { makePolicy } from "../../core/builtin-policies.js";
@@ -703,6 +705,11 @@ const handleVerifyRoute = createVerifyRoutes({
   verificationRunService,
 });
 
+const handlePeopleLiteRoute = createPeopleLiteRoutes({
+  reader: peopleLiteReaderFromEnv(process.env, { logger }),
+  respond,
+});
+
 const handleProfileRoute = createProfileRoutes({
   authMiddleware,
   readJsonBody,
@@ -1294,6 +1301,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleVerifierRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handlePeopleLiteRoute({ request, response, url, pathname })) {
       return;
     }
 

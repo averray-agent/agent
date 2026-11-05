@@ -96,6 +96,8 @@ test("metricPathLabel keeps known routes and buckets dynamic routes", () => {
   assert.equal(metricPathLabel("/disputes/dispute-1/verdict"), "/disputes/:id/verdict");
   assert.equal(metricPathLabel("/content/0xabc/publish"), "/content/:hash/publish");
   assert.equal(metricPathLabel("/agents/0xabc"), "/agents/:wallet");
+  assert.equal(metricPathLabel("/people/personhood"), "/people/personhood");
+  assert.equal(metricPathLabel("/people/personhood/0xabc"), "/people/personhood/:wallet");
   assert.equal(metricPathLabel("/something/else"), "other");
 });
 

@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
+import { personhoodLineText } from "@/lib/agents/personhood-line";
 import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { BadgeChip } from "./BadgeStrip";
+import { PersonhoodPill } from "./PersonhoodPill";
 import { TierChip } from "./TierChip";
 import {
   BADGES,
@@ -21,7 +23,13 @@ const TIERS: { id: AgentTier; label: string }[] = [
   { id: "T3", label: "Expert" },
 ];
 
-export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
+export function AgentDrawerBody({
+  agent,
+  personhood = null,
+}: {
+  agent: AgentRecord;
+  personhood?: { line?: { text?: string | null } | null } | null;
+}) {
   const lockPct = agent.stake.deposited > 0 ? agent.stake.locked / agent.stake.deposited : 0;
   const profileUrl = publicProfileUrl(agent.walletFull);
   // Badge section copy depends on whether any badge represents a
@@ -54,6 +62,7 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
           wallet={agent.walletFull}
           profileUrl={profileUrl}
           committedDepositor={agent.lockedDeposit?.committedDepositor === true}
+          personhood={personhood}
         />
       </Section>
 
@@ -230,10 +239,12 @@ function PublicIdentityCard({
   wallet,
   profileUrl,
   committedDepositor,
+  personhood = null,
 }: {
   wallet: string;
   profileUrl: string | null;
   committedDepositor: boolean;
+  personhood?: { line?: { text?: string | null } | null } | null;
 }) {
   const [copied, setCopied] = useState<"wallet" | "url" | null>(null);
 
@@ -255,12 +266,23 @@ function PublicIdentityCard({
       >
         Public identity
       </span>
-      <span
-        className="break-all font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-accent)]"
-        style={{ letterSpacing: 0 }}
-      >
-        {wallet}
+      <span className="flex flex-wrap items-center gap-2">
+        <span
+          className="break-all font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-accent)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {personhoodLineText(personhood, wallet)}
+        </span>
+        <PersonhoodPill read={personhood} />
       </span>
+      {personhood?.line?.text ? (
+        <span
+          className="break-all font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {wallet}
+        </span>
+      ) : null}
       {committedDepositor ? (
         <span className="w-fit rounded-full border border-[color:rgba(30,102,66,0.28)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-accent)]">
           Committed depositor · T90 locked deposit
