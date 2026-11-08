@@ -3024,3 +3024,20 @@ test("http smoke: terms redirects publicly and credential headers never enter HT
   assert.match(logs, /http.error/u);
   assert.ok(!logs.includes(sentinel), "no stdout/stderr log line may contain the scoped credential");
 });
+
+test("http smoke: reserve breakdown is admin-only and unavailable chain is not zero", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServer(async (base) => {
+    const path = `${base}/admin/ops/reserve-breakdown`;
+    assert.equal((await fetch(path)).status, 401);
+    const denied = await fetch(path, { headers: { authorization: `Bearer ${issueToken(STRANGER_WALLET)}` } });
+    assert.equal(denied.status, 403);
+    const response = await fetch(path, { headers: { authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}` } });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const body = await response.json();
+    assert.equal(body.status, "unavailable");
+    assert.equal(body.totalReservedRaw, null);
+    assert.equal(body.unexplainedReserved, null);
+    assert.equal((await fetch(`${base}/reserve-breakdown`)).status, 404);
+  });
+});
