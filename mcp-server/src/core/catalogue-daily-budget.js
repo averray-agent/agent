@@ -6,11 +6,19 @@ export const DEFAULT_WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW = 25_000_000;
 export const CATALOGUE_DAILY_BUDGET_EXHAUSTED_REASON = "catalogue_daily_budget_exhausted";
 export const CATALOGUE_DAILY_BUDGET_UNAVAILABLE_REASON = "catalogue_daily_budget_unavailable";
 
+export const DEFAULT_WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW = 2_000_000;
+const ENTRY_VERSION = "catalogue-daily-budget-v2";
+const LEGACY_VERSION = "catalogue-daily-budget-v1";
 const USDC_DECIMALS = 6;
 const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export function loadCatalogueDailyBudgetConfig(env = process.env) {
   return {
+    newcomerBudgetRaw: nonNegativeIntegerConfig(
+      env.WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW,
+      DEFAULT_WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW,
+      "WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW"
+    ),
     budgetRaw: nonNegativeIntegerConfig(
       env.WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW,
       DEFAULT_WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW,
@@ -25,13 +33,14 @@ export function createCatalogueDailyBudget({
   config = loadCatalogueDailyBudgetConfig(env),
   now = () => new Date()
 } = {}) {
-  return new CatalogueDailyBudget({ stateStore, budgetRaw: config.budgetRaw, now });
+  return new CatalogueDailyBudget({ stateStore, ...config, now });
 }
 
 export class CatalogueDailyBudget {
   constructor({
     stateStore,
     budgetRaw = DEFAULT_WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW,
+    newcomerBudgetRaw = DEFAULT_WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW,
     now = () => new Date()
   } = {}) {
     if (typeof stateStore?.listRecentSessions !== "function") {
@@ -43,16 +52,23 @@ export class CatalogueDailyBudget {
     }
     this.stateStore = stateStore;
     this.budgetUnits = nonNegativeRawUnits(budgetRaw, "catalogue global daily budget");
+    this.newcomerUnits = nonNegativeRawUnits(newcomerBudgetRaw, "catalogue newcomer daily budget");
     this.now = now;
   }
 
   async getStatus() {
     const evaluatedAt = asDate(this.now(), "catalogue daily budget clock");
     const current = await this.currentExposure(evaluatedAt);
-    return publicStatus({ budgetUnits: this.budgetUnits, current, evaluatedAt });
+    return {
+      status: "ok",
+      windowSeconds: ROLLING_WINDOW_MS / 1_000,
+      evaluatedAt: evaluatedAt.toISOString(),
+      ...poolStatus(this.budgetUnits, current),
+      newcomer: poolStatus(this.newcomerUnits, current.newcomer)
+    };
   }
 
-  async evaluate({ job, workerExposure } = {}) {
+  async evaluate({ job, workerExposure, catalogueAccess } = {}) {
     if (isExternalJob(job)) {
       return {
         eligible: true,
@@ -71,6 +87,21 @@ export class CatalogueDailyBudget {
       );
       const projectedUnits = current.totalUnits + candidate.totalUnits;
       const eligible = this.budgetUnits > 0n && projectedUnits <= this.budgetUnits;
+      const newcomer = catalogueAccess?.established !== true;
+      if (eligible && newcomer && (this.newcomerUnits === 0n ||
+          current.newcomer.totalUnits + candidate.totalUnits > this.newcomerUnits)) {
+        const pool = poolStatus(this.newcomerUnits, current.newcomer);
+        return {
+          eligible: false,
+          applies: true,
+          status: "exceeded",
+          reason: "catalogue_newcomer_budget_exhausted",
+          newcomer: pool,
+          retryAfter: newcomerRetryAfter(current.newcomer, candidate.totalUnits, this.newcomerUnits),
+          graduationRule: catalogueAccess?.graduationRule ?? "Graduate by settling approved catalogue jobs.",
+          message: "This claim exceeds the shared rolling 24-hour allowance for newcomers. External poster-funded work does not use this allowance."
+        };
+      }
       const remainingUnits = this.budgetUnits > current.totalUnits
         ? this.budgetUnits - current.totalUnits
         : 0n;
@@ -106,21 +137,21 @@ export class CatalogueDailyBudget {
         retryAfter,
         retryAfterSeconds,
         entry: {
-          version: "catalogue-daily-budget-v1",
+          version: ENTRY_VERSION,
+          newcomer,
           candidate: publicComponents(candidate)
         },
         message: eligible
           ? "The claim fits within the operator-wide rolling 24-hour catalogue exposure budget."
           : "The operator-wide rolling 24-hour catalogue exposure budget is exhausted. Retry after earlier catalogue exposure ages out. External poster-funded work does not use this budget."
       });
-    } catch (error) {
+    } catch {
       return {
         eligible: false,
         applies: true,
         status: "unknown",
         reason: CATALOGUE_DAILY_BUDGET_UNAVAILABLE_REASON,
-        message: "The operator-wide catalogue exposure budget could not be proven. Retry after durable session reads recover.",
-        error: error?.message ?? String(error)
+        message: "The operator-wide catalogue exposure budget could not be proven. Retry after durable session reads recover."
       };
     }
   }
@@ -128,24 +159,43 @@ export class CatalogueDailyBudget {
   async currentExposure(now = asDate(this.now(), "catalogue daily budget clock")) {
     const cutoffMs = now.getTime() - ROLLING_WINDOW_MS;
     const sessions = await collectRecentSessions(this.stateStore);
-    let totalUnits = 0n;
-    let oldestClaimedAt;
-    let sessionCount = 0;
+    const global = emptyWindow();
+    const newcomer = { ...emptyWindow(), releases: [] };
 
     for (const session of sessions) {
       if (isExternalJob(session?.jobSnapshot?.definition)) continue;
-      if (session?.catalogueDailyBudget?.version !== "catalogue-daily-budget-v1") continue;
+      const entry = session?.catalogueDailyBudget;
+      if (entry?.version !== LEGACY_VERSION && entry?.version !== ENTRY_VERSION) continue;
       const claimedAt = claimTimestamp(session);
       if (!claimedAt || claimedAt.getTime() <= cutoffMs) continue;
       const exposure = exposureFromPublicComponents(
         session.catalogueDailyBudget.candidate,
         `session ${session.sessionId} catalogue exposure`
       );
-      totalUnits += exposure.totalUnits;
-      sessionCount += 1;
-      if (!oldestClaimedAt || claimedAt < oldestClaimedAt) oldestClaimedAt = claimedAt;
+      addToWindow(global, exposure.totalUnits, claimedAt);
+      // During the first 24h after rollout v1 sessions have no recorded class.
+      // Count them conservatively until they age out; never reclassify a past claim.
+      if (entry.version === LEGACY_VERSION || entry.newcomer !== false) {
+        addToWindow(newcomer, exposure.totalUnits, claimedAt);
+        newcomer.releases.push({ at: claimedAt.getTime() + ROLLING_WINDOW_MS, units: exposure.totalUnits });
+      }
     }
-    return { totalUnits, sessionCount, oldestClaimedAt };
+    return { ...global, newcomer };
+  }
+}
+
+export async function getCatalogueDailyBudgetStatusSafely(budget) {
+  if (typeof budget?.getStatus !== "function") {
+    return { status: "unavailable", reason: "catalogue_daily_budget_not_configured" };
+  }
+  try {
+    return await budget.getStatus();
+  } catch {
+    return {
+      status: "unavailable",
+      reason: "catalogue_daily_budget_read_failed",
+      lastError: "catalogue_daily_budget_read_failed"
+    };
   }
 }
 
@@ -153,7 +203,8 @@ async function collectRecentSessions(stateStore, { pageSize = 64, maxSessions = 
   const sessions = [];
   for (let offset = 0; offset < maxSessions; offset += pageSize) {
     const page = await stateStore.listRecentSessions(pageSize, offset);
-    if (!Array.isArray(page) || page.length === 0) break;
+    if (!Array.isArray(page)) throw new Error("Catalogue session history unavailable");
+    if (page.length === 0) break;
     sessions.push(...page);
     if (page.length < pageSize) break;
   }
@@ -163,12 +214,30 @@ async function collectRecentSessions(stateStore, { pageSize = 64, maxSessions = 
   return sessions;
 }
 
-function publicStatus({ budgetUnits, current, evaluatedAt }) {
+function emptyWindow() {
+  return { totalUnits: 0n, sessionCount: 0, oldestClaimedAt: undefined };
+}
+
+function addToWindow(window, units, claimedAt) {
+  window.totalUnits += units;
+  window.sessionCount++;
+  if (!window.oldestClaimedAt || claimedAt < window.oldestClaimedAt) window.oldestClaimedAt = claimedAt;
+}
+
+// If multiple entries must expire, the first release is not a viable retry time.
+function newcomerRetryAfter(window, candidate, limit) {
+  if (limit === 0n || candidate > limit) return null;
+  let projected = window.totalUnits + candidate;
+  for (const release of window.releases.sort((a, b) => a.at - b.at)) {
+    projected -= release.units;
+    if (projected <= limit) return new Date(release.at).toISOString();
+  }
+  return null;
+}
+
+function poolStatus(budgetUnits, current) {
   const remainingUnits = budgetUnits > current.totalUnits ? budgetUnits - current.totalUnits : 0n;
   return {
-    status: "ok",
-    windowSeconds: ROLLING_WINDOW_MS / 1_000,
-    evaluatedAt: evaluatedAt.toISOString(),
     totalRaw: budgetUnits.toString(),
     usedRaw: current.totalUnits.toString(),
     remainingRaw: remainingUnits.toString(),

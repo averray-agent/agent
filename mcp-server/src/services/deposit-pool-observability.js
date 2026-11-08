@@ -1,3 +1,4 @@
+import { getCatalogueDailyBudgetStatusSafely } from "../core/catalogue-daily-budget.js";
 import { Contract, Interface, ZeroAddress, getAddress } from "ethers";
 
 import {
@@ -227,7 +228,7 @@ export class DepositPoolObservabilityService {
   }
 
   async getSnapshot() {
-    const catalogueDailyBudget = await this.#catalogueBudgetStatus();
+    const catalogueDailyBudget = await getCatalogueDailyBudgetStatusSafely(this.catalogueDailyBudget);
     if (!this.poolAddress) {
       return {
         schemaVersion: 1,
@@ -349,20 +350,5 @@ export class DepositPoolObservabilityService {
       bornEmpty: totalShares === 0n && flows.status === "ok" && flows.depositorCount === 0,
       flows
     };
-  }
-
-  async #catalogueBudgetStatus() {
-    if (typeof this.catalogueDailyBudget?.getStatus !== "function") {
-      return { status: "unavailable", reason: "catalogue_daily_budget_not_configured" };
-    }
-    try {
-      return await this.catalogueDailyBudget.getStatus();
-    } catch {
-      return {
-        status: "unavailable",
-        reason: "catalogue_daily_budget_read_failed",
-        lastError: "catalogue_daily_budget_read_failed"
-      };
-    }
   }
 }

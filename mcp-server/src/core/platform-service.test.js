@@ -1,3 +1,4 @@
+import { CatalogueDailyBudget } from "./catalogue-daily-budget.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Wallet, id } from "ethers";
@@ -1352,14 +1353,16 @@ test("preflight uses chain worker claim count for claim economics in blockchain 
 });
 
 test("designated-claimant parity mutation drill binds both preflight and claim to the same wallet", async () => {
+  const store = new MemoryStateStore();
+  const pool = new CatalogueDailyBudget({ stateStore: store, newcomerBudgetRaw: 0 });
   const service = makePlatformService(
     undefined,
     undefined,
-    new MemoryStateStore(),
+    store,
     undefined,
     undefined,
     undefined,
-    undefined,
+    pool,
     {
       designatedClaimants: [DESIGNATED_WALLET],
       requiresSponsoredGas: false,
@@ -1390,6 +1393,8 @@ test("designated-claimant parity mutation drill binds both preflight and claim t
   );
   assert.equal(claimed.status, "claimed");
   assert.equal(claimed.wallet, WALLET);
+  assert.equal(claimed.catalogueDailyBudget, undefined);
+  assert.equal((await pool.getStatus()).newcomer.claimCount, 0);
 });
 
 test("designated agreements are restricted and excluded from every open inventory count", async () => {
@@ -3484,4 +3489,33 @@ test("verification settlement persists progression and settled-session reads reu
     to: true
   });
   assert.deepEqual(resumed.progression, settled.progression);
+});
+
+test("an exhausted shared pool gives preflight, explainEligibility and claim the same graduation decision", async () => {
+  for (const established of [false, true]) {
+    const store = new MemoryStateStore();
+    const candidate = { reservedRewardUsdc: 1, brokeredGasUsdc: 0, totalUsdc: 1 };
+    const worker = { async evaluate() { return { eligible: true, candidate }; } };
+    const daily = { async evaluate() { return { eligible: true, catalogueAccess: { established, graduationRule: "10 approved settlements" } }; } };
+    const pool = new CatalogueDailyBudget({ stateStore: store, newcomerBudgetRaw: 0 });
+    const service = makePlatformService(undefined, undefined, store, undefined, worker, daily, pool);
+    const id = "parent-job-001";
+    const preflight = await service.preflightJob(WALLET, id);
+    const explain = await service.explainEligibility(WALLET, id);
+    assert.equal(preflight.eligible, established);
+    assert.equal(explain.eligible, established);
+    if (established) {
+      const claim = await service.claimJob(WALLET, id, "http", "graduated");
+      assert.equal(claim.catalogueDailyBudget.newcomer, false);
+    } else {
+      assert.equal(preflight.reason, "catalogue_newcomer_budget_exhausted");
+      assert.equal(explain.reason, preflight.reason);
+      await assert.rejects(service.claimJob(WALLET, id, "http", "newcomer"), err => {
+        assert.equal(err.code, preflight.reason);
+        assert.deepEqual(err.details, preflight.catalogueDailyBudget);
+        assert.deepEqual(err.details, explain.catalogueDailyBudget);
+        return true;
+      });
+    }
+  }
 });

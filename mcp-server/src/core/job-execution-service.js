@@ -743,7 +743,7 @@ export class JobExecutionService {
           if (!isDesignatedJob(job)) {
             workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
             dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-            catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+            catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure, catalogueAccess: dailyExposure?.catalogueAccess });
           }
           if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
             const predictedClaimEconomics = claimEconomics;
@@ -777,7 +777,7 @@ export class JobExecutionService {
         if (!isDesignatedJob(job)) {
           workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
           dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure, catalogueAccess: dailyExposure?.catalogueAccess });
         }
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
@@ -838,7 +838,7 @@ export class JobExecutionService {
         if (!isDesignatedJob(job)) {
           workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
           dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure, catalogueAccess: dailyExposure?.catalogueAccess });
         }
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
@@ -969,9 +969,9 @@ export class JobExecutionService {
     );
   }
 
-  async requireCatalogueDailyBudget({ job, workerExposure }) {
+  async requireCatalogueDailyBudget({ job, workerExposure, catalogueAccess }) {
     if (!this.catalogueDailyBudget) return undefined;
-    const decision = await this.catalogueDailyBudget.evaluate({ job, workerExposure });
+    const decision = await this.catalogueDailyBudget.evaluate({ job, workerExposure, catalogueAccess });
     if (decision.eligible === true) return decision;
     throw new ConflictError(
       decision.message ?? "The operator-wide catalogue exposure budget could not accept this claim.",
