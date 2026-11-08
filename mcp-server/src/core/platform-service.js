@@ -1,3 +1,4 @@
+import { getCatalogueDailyBudgetStatusSafely } from "./catalogue-daily-budget.js";
 import { createStateStore } from "./state-store.js";
 import { matchesPublicJobId } from "./public-job-identity.js";
 import { createGithubAuthorsProvider } from "../services/github-author-visibility.js";
@@ -774,6 +775,7 @@ export class PlatformService {
       jobStaleSweeper,
       submittedJobAutoVerifier,
       catalogueLanes,
+      catalogueDailyBudget,
       recentSessions,
       hostDiagnostics,
       siweAuthTelemetry,
@@ -937,6 +939,7 @@ export class PlatformService {
         lastRun: undefined
       },
       getCatalogueLaneStatusSafely(this.catalogueLaneDiscipline),
+      getCatalogueDailyBudgetStatusSafely(this.catalogueDailyBudget),
       this.jobExecutionService.listRecentSessions(14),
       Promise.resolve().then(() => collectHostDiagnostics()),
       resolveSiweAuthTelemetry(this.stateStore),
@@ -1106,6 +1109,7 @@ export class PlatformService {
       },
       anomalies,
       ops: {
+        catalogueDailyBudget,
         recentSessions: recentSessions.map((session) => ({
           sessionId: session.sessionId,
           wallet: session.wallet,
@@ -1410,7 +1414,7 @@ export class PlatformService {
       const catalogueDailyBudget = this.catalogueDailyBudget
         && workerExposure?.eligible !== false
         && dailyExposure?.eligible !== false
-        ? await this.catalogueDailyBudget.evaluate({ job, workerExposure })
+        ? await this.catalogueDailyBudget.evaluate({ job, workerExposure, catalogueAccess: dailyExposure?.catalogueAccess })
         : undefined;
       const exposureDecision = workerExposure?.eligible === false
         ? workerExposure

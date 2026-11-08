@@ -98,6 +98,7 @@ async function startServer(port, envOverrides = {}, execArgv = []) {
       WORKER_DAILY_EXPOSURE_BUDGET_RAW: "1000000000",
       WORKER_LIFETIME_CATALOGUE_CREDIT_RAW: "1000000000",
       WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW: "1000000000",
+      WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW: "1000000000",
       // Synthetic operator fixtures have a test consumer. The production
       // Wikipedia lane remains consumer:none and is covered by ingestion tests.
       CATALOGUE_LANE_REGISTRY_JSON: JSON.stringify({
@@ -3023,4 +3024,39 @@ test("http smoke: terms redirects publicly and credential headers never enter HT
   assert.match(logs, /http.response/u);
   assert.match(logs, /http.error/u);
   assert.ok(!logs.includes(sentinel), "no stdout/stderr log line may contain the scoped credential");
+});
+
+test("http smoke: newcomer exhaustion is a private 409 and admin reports aggregate usage", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServerEnv({ WORKER_CATALOGUE_NEWCOMER_DAILY_BUDGET_RAW: "159000" }, async base => {
+    const admin = { authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}`, "content-type": "application/json" };
+    for (const [index, wallet] of [STRANGER_WALLET, VERIFIER_WALLET].entries()) {
+      const id = `pool-smoke-${index}`;
+      const created = await fetch(base + "/admin/jobs", { method: "POST", headers: admin, body: JSON.stringify({
+        id, category: "coding", tier: "starter", lane: "benchmark-showcase", rewardAsset: "USDC", rewardAmount: 0.1,
+        onboardingWaiverEligible: true, verifierMode: "benchmark", verifierTerms: ["complete"], verifierMinimumMatches: 1
+      }) });
+      assert.ok(created.ok, await created.text());
+      const headers = { authorization: `Bearer ${issueToken(wallet)}` };
+      const response = await fetch(base + `/jobs/claim?jobId=${id}&idempotencyKey=${id}`, { method: "POST", headers });
+      const body = await response.json();
+      assert.equal(response.status, index === 0 ? 200 : 409, JSON.stringify(body));
+      if (index === 1) {
+        assert.equal(body.error, "catalogue_newcomer_budget_exhausted");
+        assert.doesNotMatch(JSON.stringify(body), /0x[\da-f]{40}/i);
+        assert.equal(body.details.newcomer.remainingRaw, "0");
+      }
+    }
+    const status = await (await fetch(base + "/admin/status", { headers: admin })).json();
+    const pool = status.ops.catalogueDailyBudget.newcomer;
+    assert.equal(pool.totalRaw, "159000");
+    assert.equal(pool.usedRaw, pool.totalRaw);
+    assert.equal(pool.claimCount, 1);
+    assert.ok(Date.parse(pool.nextReleaseAt));
+    const monitor = await (await fetch(base + "/monitor/deposit-pool")).json();
+    assert.deepEqual(monitor.catalogueDailyBudget.newcomer, pool);
+    assert.deepEqual(Object.keys(pool).sort(), [
+      "claimCount", "nextReleaseAt", "remaining", "remainingRaw", "total", "totalRaw", "used", "usedRaw"
+    ]);
+    assert.doesNotMatch(JSON.stringify(pool), /0x[\da-f]{40}/i);
+  });
 });

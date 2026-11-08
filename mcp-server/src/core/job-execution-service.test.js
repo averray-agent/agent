@@ -11,6 +11,7 @@ import { transitionSession } from "./session-state-machine.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
 import { hashCanonicalContent } from "./canonical-content.js";
 import { WorkerExposurePolicy } from "./worker-exposure.js";
+import { CatalogueDailyBudget } from "./catalogue-daily-budget.js";
 import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
 import { waitForTransaction } from "../blockchain/transaction-wait.js";
@@ -86,7 +87,7 @@ test("hosted canary claim completes through the finite lifetime credit and recor
   const job = makeJob({
     id: "worker-canary-1786453506586",
     rewardAsset: "USDC",
-    rewardAmount: 0.25
+    rewardAmount: 0.10
   });
   const workerExposurePolicy = new WorkerExposurePolicy({
     stateStore,
@@ -107,7 +108,7 @@ test("hosted canary claim completes through the finite lifetime credit and recor
     undefined,
     () => job,
     undefined,
-    { workerExposurePolicy, workerDailyExposurePolicy }
+    { workerExposurePolicy, workerDailyExposurePolicy, catalogueDailyBudget: new CatalogueDailyBudget({ stateStore }) }
   );
 
   const claimed = await service.claimJob(WALLET, job.id, "http", "canary-lifetime-credit", {
@@ -118,13 +119,14 @@ test("hosted canary claim completes through the finite lifetime credit and recor
   });
 
   assert.equal(claimed.status, "claimed");
+  assert.deepEqual(claimed.catalogueDailyBudget, { version: "catalogue-daily-budget-v2", newcomer: true, candidate: claimed.dailyExposure.candidate });
   assert.deepEqual(claimed.dailyExposure, {
     version: "worker-catalogue-exposure-v2",
     accessMode: "lifetime_credit",
     candidate: {
-      reservedRewardUsdc: 0.25,
+      reservedRewardUsdc: 0.10,
       brokeredGasUsdc: 0.059,
-      totalUsdc: 0.309
+      totalUsdc: 0.159
     }
   });
 });
@@ -2107,4 +2109,72 @@ test("submitWork refuses to start a second submit while the session lock is held
   // The contender did not advance the session.
   const stored = await stateStore.getSession(claimed.sessionId);
   assert.equal(stored.status, "claimed");
+});
+
+function newcomerHarness({ newcomerBudgetRaw = 2_000_000, chain = false } = {}) {
+  const stateStore = new MemoryStateStore();
+  const job = (id) => makeJob({ id, rewardAsset: "USDC", rewardAmount: 1 });
+  const workerExposurePolicy = new WorkerExposurePolicy({ stateStore, capUsdc: 10, gasEstimateUsdc: 0 });
+  // Raise only the fixture's independent wallet rolling cap so three $1 claims fit.
+  const workerDailyExposurePolicy = new WorkerDailyExposurePolicy({ stateStore, workerExposurePolicy, budgetRaw: 5_000_000 });
+  const catalogueDailyBudget = new CatalogueDailyBudget({ stateStore, budgetRaw: 5_000_000, newcomerBudgetRaw });
+  const funded = [];
+  const gateway = chain ? {
+    isEnabled: () => true, toJobId: id => id, getWorkerClaimCount: async () => 3,
+    getClaimEconomicsDecisionState: async () => ({ state: 0, exists: false, contractLayout: "current", onboardingWaiverEligible: false }),
+    getJob: async () => ({ state: 0 }), ensureJob: async (definition) => { funded.push(definition.id); }, claimJob: async () => {}
+  } : undefined;
+  const service = new JobExecutionService(stateStore, gateway, job, undefined, undefined, undefined, job, undefined,
+    { workerExposurePolicy, workerDailyExposurePolicy, catalogueDailyBudget });
+  return { stateStore, catalogueDailyBudget, funded,
+    claim: (wallet, id) => service.claimJob(wallet, id, "http", id) };
+}
+
+async function graduate(stateStore, wallet, count = 10) {
+  for (let index = 0; index < count; index++) await stateStore.upsertSession({
+    sessionId: `history-${index}`, jobId: `old-${index}`, wallet, status: "resolved",
+    claimedAt: "2026-01-01T00:00:00Z", verificationSummary: { outcome: "approved" }
+  });
+}
+
+for (const chain of [false, true]) {
+  test(`rotating wallets share two claims; one established wallet fits three (chain=${chain})`, async () => {
+    const h = newcomerHarness({ chain });
+    const third = "0xcccccccccccccccccccccccccccccccccccccccc";
+    await graduate(h.stateStore, third, 9); // still one approved settlement short
+    for (const [n, wallet] of [WALLET, WALLET_2].entries()) {
+      const session = await h.claim(wallet, `first-${n}`);
+      assert.equal(session.catalogueDailyBudget.newcomer, true);
+      assert.equal(session.catalogueDailyBudget.version, "catalogue-daily-budget-v2");
+    }
+    await assert.rejects(() => h.claim(third, "third"), err => {
+      assert.equal(err.code, "catalogue_newcomer_budget_exhausted");
+      assert.equal(err.statusCode, 409);
+      assert.equal(err.details.newcomer.usedRaw, "2000000");
+      assert.equal(err.details.newcomer.remainingRaw, "0");
+      assert.match(err.details.graduationRule, /10 settled and approved catalogue jobs/);
+      assert.doesNotMatch(JSON.stringify(err), /0x[\da-f]{40}/i);
+      return true;
+    });
+    assert.equal(h.funded.includes("third"), false);
+    const established = newcomerHarness({ chain });
+    await graduate(established.stateStore, WALLET);
+    for (let i = 0; i < 3; i++) {
+      const session = await established.claim(WALLET, `established-${i}`);
+      assert.equal(session.catalogueDailyBudget.newcomer, false);
+    }
+    const status = await established.catalogueDailyBudget.getStatus();
+    assert.equal(status.usedRaw, "3000000");
+    assert.equal(status.newcomer.usedRaw, "0");
+  });
+}
+
+test("overlapping claims for the last newcomer slot serialize across wallets", async () => {
+  const h = newcomerHarness({ newcomerBudgetRaw: 1_000_000 });
+  const outcomes = await Promise.allSettled([h.claim(WALLET, "race-a"), h.claim(WALLET_2, "race-b")]);
+  assert.equal(outcomes.filter(o => o.status === "fulfilled").length, 1);
+  const loser = outcomes.findIndex(o => o.status === "rejected");
+  assert.equal(outcomes[loser].reason.code, "catalogue_daily_budget_check_in_progress");
+  await assert.rejects(() => h.claim([WALLET, WALLET_2][loser], ["race-a", "race-b"][loser]), { code: "catalogue_newcomer_budget_exhausted" });
+  assert.equal((await h.catalogueDailyBudget.getStatus()).newcomer.claimCount, 1);
 });
