@@ -297,7 +297,8 @@ test("an expired claim and a close without a pull request set no cooldown", asyn
   assert.equal((await readMaintainerRepoCooldownCounters(stateStore)).wouldRefuse, 0);
 });
 
-test("a renamed repository keeps the cooldown stored for its id", async () => {
+test("a renamed repository keeps the cooldown stored for its id", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const stateStore = new MemoryStateStore();
   await recordMaintainerClose({
     stateStore, repoId: REPO_ID, fullName: "old/name", pullNumber: 5, now: NOW, config: { days: 7, repeatDays: 30 }
@@ -326,7 +327,8 @@ test("a renamed repository keeps the cooldown stored for its id", async () => {
   assert.equal(stored.cooldownReason, "maintainer_close");
 });
 
-test("log mode never refuses a cooled-down repository and increments wouldRefuse", async () => {
+test("log mode never refuses a cooled-down repository and increments wouldRefuse", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const stateStore = new MemoryStateStore();
   const logs = [];
   await recordMaintainerClose({
@@ -675,7 +677,8 @@ test("a contended cooldown lock is retried and then logged instead of dropping t
   assert.equal(recorded.record.cooldownReason, "maintainer_close");
 });
 
-test("a failed cooldown read allows the claim and a failed counter write does not undo it", async () => {
+test("a failed cooldown read allows the claim and a failed counter write does not undo it", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const logs = [];
   const stateStore = new MemoryStateStore();
   await recordMaintainerClose({
