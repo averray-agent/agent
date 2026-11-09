@@ -38,7 +38,7 @@ Add `deployments/signer-asset-returns.mainnet.json`:
       "asset": "0x000007C000000000000000000000000001200000",
       "symbol": "USDt",
       "decimals": 6,
-      "destination": "<PASCAL SUPPLIES — EVM H160>",
+      "destination": "0xe30478EB20E5380849e96E0f1002821dacF339e5",
       "maxRaw": "13000000",
       "reason": "USDt sent to the signer by mistake on 2026-11-09",
       "approvedBy": "Pascal",
@@ -57,9 +57,13 @@ Add `deployments/signer-asset-returns.mainnet.json`:
   - a destination equal to the signer, the zero address, or any address in
     `deployments/mainnet.json`;
   - a `signer` that doesn't match `deployments/mainnet.json` `verifier`.
-- **Placeholder.** Ship the PR with the destination placeholder. **Claude
-  does not merge it** until Pascal supplies the address and it is committed.
-
+- **Destination (supplied 2026-11-09):** Pascal gave the SS58 account
+  `121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv` (AccountId32
+  `0x2cdb40f6…ab7e`, not eth-derived). Its revive H160 is
+  `keccak256(AccountId32)[12..]` = `0xe30478EB20E5380849e96E0f1002821dacF339e5`.
+  On chain (eth-rpc, 2026-11-09) that H160 reports nonce 200, 6.67 DOT and
+  0.613916 USDC, so it resolves to Pascal's live, mapped account, not to an
+  empty 0xEE fallback. The 0.01 USDt test transfer below is still required.
 ### 2. A script: `scripts/ops/return-signer-asset.mjs`
 
 Mirror `fund-signer-usdc-deposit.mjs`: the same RPC selection, chain-id
