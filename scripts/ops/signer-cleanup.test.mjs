@@ -172,7 +172,7 @@ test("signer queue cannot displace pending production deploy; dry-run, restart l
   assert.equal(workflow.on.workflow_dispatch.inputs.commit.default, false);
   const deploy = YAML.load(await readFile(new URL(".github/workflows/deploy-production.yml", root), "utf8"));
   assert.equal(deploy.concurrency.group, "production");
-  for (const name of ["hosted-signer-cleanup", "hosted-signer-liquidity-funding", "hosted-worker-canary", "hosted-dispute-verdict-proof", "hosted-external-schema-proof"]) {
+  for (const name of ["hosted-signer-cleanup", "hosted-signer-asset-return", "hosted-signer-liquidity-funding", "hosted-worker-canary", "hosted-dispute-verdict-proof", "hosted-external-schema-proof"]) {
     const w = YAML.load(await readFile(new URL(`.github/workflows/${name}.yml`, root), "utf8"));
     assert.equal(w.concurrency.group, "production-signer-5a6836", name); assert.notEqual(w.concurrency.group, deploy.concurrency.group);
     assert.equal(w.concurrency["cancel-in-progress"], false);
