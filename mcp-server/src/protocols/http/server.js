@@ -22,6 +22,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminMaintainerCooldownRoutes } from "./admin-maintainer-cooldown-routes.js";
+import { createAdminSelfIdentityRoutes } from "./admin-self-identity-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminArrivalAlertRoutes } from "./admin-arrival-alert-routes.js";
 import { createAdminArrivalSessionRoutes } from "./admin-arrival-session-routes.js";
@@ -619,6 +620,15 @@ const handleAdminMaintainerCooldownRoute = createAdminMaintainerCooldownRoutes({
   readJsonBody,
   respond,
   service,
+});
+
+const handleAdminSelfIdentityRoute = createAdminSelfIdentityRoutes({
+  authMiddleware,
+  readJsonBody,
+  respond,
+  service,
+  stateStore,
+  logger
 });
 
 const handleAdminSessionsRoute = createAdminSessionsRoutes({
@@ -1356,6 +1366,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminMaintainerCooldownRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminSelfIdentityRoute({ request, response, url, pathname })) {
       return;
     }
 

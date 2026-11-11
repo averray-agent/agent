@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { MemoryStateStore } from "../core/state-store.js";
 import { PlatformService } from "../core/platform-service.js";
+import { SelfIdentityRegistry, editAdminOurs } from "../core/self-identity-registry.js";
 import { boundGithubAuthor, createGithubAuthorsProvider, readGithubAuthors } from "./github-author-visibility.js";
 
 const now = new Date("2026-10-08T12:00:00Z");
@@ -140,6 +141,38 @@ test("author scan fails closed at the 10000-session paging bound instead of publ
   await assert.rejects(readGithubAuthors(store, { now }), /exceeded the 10000 record bound/u);
   assert.equal(calls, 100);
   await assert.rejects(readGithubAuthors({ listRecentSessions: async () => ({}) }, { now }), /non-array page/u);
+});
+
+test("registry ours are excluded from author counts and concentration", async () => {
+  const store = new MemoryStateStore();
+  const registry = new SelfIdentityRegistry();
+  const ours = wallet(90);
+  const operator = wallet(91);
+  await editAdminOurs(store, {
+    action: "add", wallet: ours, label: "dogfood", purpose: "dogfood",
+    addedBy: operator, reason: "listed", logger: { info() {} }
+  });
+  await registry.hydrateAdminOurs(store);
+  for (let index = 1; index <= 3; index += 1) {
+    const session = {
+      sessionId: `ours-${index}`, wallet: ours, status: "submitted",
+      jobSnapshot: { definition: { verifierMode: "github_pr" } }
+    };
+    await store.upsertSession(session);
+    await store.upsertMutationReceipt("github_pr_author", session.sessionId, {
+      githubLookup: lookup("hidden-author"), previewOutcome: "approved"
+    });
+  }
+  await add(store, 4, "visible");
+  const result = await readGithubAuthors(store, { now, selfIdentityRegistry: registry });
+  assert.equal(result.distinctAuthors, 1);
+  assert.equal(result.authors[0].author, "visible");
+  assert.equal(result.githubSessions, 1);
+  assert.equal(result.openClaims, 1);
+  assert.equal(result.distinctWallets, 1);
+  assert.equal(result.warnings.some((warning) => warning.code === "github_author_concentration"), false);
+  const published = JSON.stringify({ authors: result.authors, warnings: result.warnings });
+  assert.equal(published.toLowerCase().includes(ours.slice(2)), false);
 });
 
 test("operator board presents author counts, windows, payout uncertainty and coverage outside desktop-only layout", () => {

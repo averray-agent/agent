@@ -11,6 +11,7 @@ import {
 
 test("resolveCapabilities returns base capabilities for signed-in wallets", () => {
   const capabilities = resolveCapabilities({ roles: [] });
+  assert.equal(capabilities.includes("admin:self-identity"), false);
   assert.ok(capabilities.includes("jobs:claim"));
   assert.ok(capabilities.includes("session:timeline"));
   assert.ok(capabilities.includes("xcm:read"));
@@ -21,6 +22,7 @@ test("resolveCapabilities expands admin and verifier capabilities", () => {
   assert.ok(capabilities.includes("jobs:create"));
   assert.ok(capabilities.includes("jobs:ingest"));
   assert.ok(capabilities.includes("jobs:lifecycle"));
+  assert.ok(capabilities.includes("admin:self-identity"));
   assert.ok(capabilities.includes("jobs:pause-recurring"));
   assert.ok(capabilities.includes("jobs:timeline"));
   assert.ok(capabilities.includes("ops:view"));
@@ -61,6 +63,7 @@ test("viewer-only capability issuance contains every operator read and no mutati
     "jobs:claim",
     "jobs:create",
     "jobs:lifecycle",
+    "admin:self-identity",
     "jobs:pause-recurring",
     "payments:send",
     "policies:propose",
@@ -114,6 +117,8 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.deepEqual(matrix.uiControls["capital.transparency.view"], ["ops:view"]);
   assert.deepEqual(matrix.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
   assert.deepEqual(matrix.uiControls["admin.bootstrapSelfReport.send"], ["admin:self-report:send"]);
+  assert.deepEqual(matrix.uiControls["admin.selfIdentity.edit"], ["admin:self-identity"]);
+  assert.equal(matrix.roles.viewer.includes("admin:self-identity"), false);
   assert.deepEqual(matrix.automationActions["bootstrapSelfReport.send"], ["admin:self-report:send"]);
   assert.deepEqual(matrix.automationActions["job.fireRecurring"], ["jobs:fire-recurring"]);
 });
@@ -137,6 +142,7 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
     getRouteCapabilityRequirements("POST", "/admin/maintainer-repos/424242/cooldown/clear"),
     ["jobs:lifecycle"]
   );
+  assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/self-identity/ours"), ["admin:self-identity"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/deposit/transactions"), ["account:read"]);

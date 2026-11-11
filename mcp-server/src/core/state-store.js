@@ -387,6 +387,7 @@ export class MemoryStateStore {
     this.verificationAuthorizationRuns = new Map();
     this.verificationRunAuthorizations = new Map();
     this.claimLocks = new Map();
+    this.serviceLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
     this.walletQuotas = new Map();
@@ -839,6 +840,26 @@ export class MemoryStateStore {
     const existing = this.claimLocks.get(lockId);
     if (existing?.owner === owner) {
       this.claimLocks.delete(lockId);
+    }
+  }
+
+  async acquireServiceLock(lockId, owner, ttlSeconds = 30) {
+    const now = Date.now();
+    const existing = this.serviceLocks.get(lockId);
+    if (existing && existing.expiresAt > now && existing.owner !== owner) {
+      return false;
+    }
+    this.serviceLocks.set(lockId, {
+      owner,
+      expiresAt: now + (ttlSeconds * 1000)
+    });
+    return true;
+  }
+
+  async releaseServiceLock(lockId, owner) {
+    const existing = this.serviceLocks.get(lockId);
+    if (existing?.owner === owner) {
+      this.serviceLocks.delete(lockId);
     }
   }
 
@@ -2188,6 +2209,24 @@ export class RedisStateStore {
   async releaseClaimLock(lockId, owner) {
     await this.connect();
     const key = this.key("claim-lock", lockId);
+    await this.client.eval(RELEASE_CLAIM_LOCK_SCRIPT, {
+      keys: [key],
+      arguments: [owner]
+    });
+  }
+
+  async acquireServiceLock(lockId, owner, ttlSeconds = 30) {
+    await this.connect();
+    const reply = await this.client.set(this.key("service-lock", lockId), owner, {
+      NX: true,
+      EX: ttlSeconds
+    });
+    return reply === "OK";
+  }
+
+  async releaseServiceLock(lockId, owner) {
+    await this.connect();
+    const key = this.key("service-lock", lockId);
     await this.client.eval(RELEASE_CLAIM_LOCK_SCRIPT, {
       keys: [key],
       arguments: [owner]
