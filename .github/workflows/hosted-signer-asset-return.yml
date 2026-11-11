@@ -1,0 +1,180 @@
+name: Hosted Signer Asset Return
+
+on:
+  workflow_dispatch:
+    inputs:
+      key:
+        description: Committed allow-list entry key
+        required: true
+        default: usdt-2026-11
+        type: string
+      amount_raw:
+        description: Asset amount in raw units; 10000 = 0.01 USDt.
+        required: true
+        default: "10000"
+        type: string
+      commit:
+        description: Send exactly one transfer. Leave false for KMS-aware dry-run.
+        required: true
+        default: false
+        type: boolean
+
+      expected_plan_hash:
+        description: SHA-256 from reviewed dry run (required for commit)
+        required: false
+        type: string
+      confirm:
+        description: RETURN followed by the first 12 hex characters of the reviewed hash
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-signer-5a6836 # separate from deploy's pending-run queue
+  cancel-in-progress: false
+
+jobs:
+  return-asset:
+    if: github.ref == 'refs/heads/main'
+    name: Return reviewed stray signer asset
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      SIGNER_RETURN_KEY: ${{ inputs.key }}
+      SIGNER_RETURN_PLAN_HASH: ${{ inputs.expected_plan_hash }}
+      SIGNER_RETURN_CONFIRM: ${{ inputs.confirm }}
+      SIGNER_RETURN_AMOUNT_RAW: ${{ inputs.amount_raw }}
+      SIGNER_RETURN_COMMIT: ${{ inputs.commit && '1' || '0' }}
+    steps:
+      - name: Validate requested amount
+        run: |
+          set -euo pipefail
+          case "$SIGNER_RETURN_AMOUNT_RAW" in
+            ''|*[!0-9]*)
+              echo "::error::amount_raw must be a positive integer in asset base units."
+              exit 1
+              ;;
+          esac
+          if [ "$SIGNER_RETURN_AMOUNT_RAW" = "0" ]; then
+            echo "::error::amount_raw must be greater than zero."
+            exit 1
+          fi
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+
+      - name: Load prod-ci SSH key from 1Password (fail-closed)
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Validate SSH key shape
+        run: |
+          set -euo pipefail
+          set +x
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key."
+            exit 1
+          fi
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*) echo "VPS_SSH_KEY_OP: SSH private-key shape valid" ;;
+            *) echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"; exit 1 ;;
+          esac
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run signer asset return
+        id: asset-return
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          log_path="artifacts/signer-asset-return-${GITHUB_RUN_ID}.log"
+          remote_env=$(
+            printf 'SIGNER_RETURN_AMOUNT_RAW=%q SIGNER_RETURN_COMMIT=%q SIGNER_RETURN_KEY=%q SIGNER_RETURN_PLAN_HASH=%q SIGNER_RETURN_CONFIRM=%q ' \
+              "$SIGNER_RETURN_AMOUNT_RAW" \
+              "$SIGNER_RETURN_COMMIT" \
+              "$SIGNER_RETURN_KEY" \
+              "$SIGNER_RETURN_PLAN_HASH" \
+              "$SIGNER_RETURN_CONFIRM"
+          )
+
+          : > "$log_path"
+          set +e
+          ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" <<'REMOTE' 2>&1 | tee "$log_path"
+          set -euo pipefail
+          cd /srv/agent-stack
+
+          # --profile is explicit: the script no longer defaults, because its old
+          # testnet default became silently wrong at the 2026-07-27 mainnet cutover.
+          mode_args=(--profile mainnet --key "$SIGNER_RETURN_KEY" --amount "$SIGNER_RETURN_AMOUNT_RAW" --use-kms)
+          expected_signer=$(jq -er '.verifier | select(type == "string" and test("^0x[0-9a-fA-F]{40}$"))' /srv/agent-stack/app/deployments/mainnet.json)
+          mode_args+=(--expected-signer "$expected_signer")
+          if [ "$SIGNER_RETURN_COMMIT" = "1" ]; then
+            mode_args+=(--commit --expected-plan-hash "$SIGNER_RETURN_PLAN_HASH" --confirm "$SIGNER_RETURN_CONFIRM")
+          fi
+
+          # Use the production backend image/env because it already carries
+          # the IAM Roles Anywhere helper + KMS runtime configuration. The
+          # repo-level ops script and deployment manifest are bind-mounted
+          # read-only into /app, where the backend image keeps mcp-server code
+          # and node_modules.
+          sudo docker compose \
+            --project-directory /srv/agent-stack/app \
+            -f /srv/agent-stack/app/deploy/docker-compose.mainnet.yml \
+            run --rm --no-deps -T \
+            -e AWS_PROFILE=averray-signer \
+            -e AWS_SDK_LOAD_CONFIG=1 \
+            -v /srv/agent-stack/app/scripts:/app/scripts:ro \
+            -v /srv/agent-stack/app/deployments:/app/deployments:ro \
+            -v /srv/agent-stack/app/mcp-server:/app/mcp-server:ro \
+            mainnet-backend \
+            sh -lc 'cd /app && node scripts/ops/return-signer-asset.mjs "$@"' \
+            sh "${mode_args[@]}"
+          REMOTE
+          status=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          echo "log_path=$log_path" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Hosted Signer Asset Return"
+            echo
+            echo "- Amount raw: \`${SIGNER_RETURN_AMOUNT_RAW}\`"
+            echo "- Commit: \`${SIGNER_RETURN_COMMIT}\`"
+            echo "- Exit status: \`${status}\`"
+            echo
+            echo '```text'
+            sed -n '1,220p' "$log_path"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      - name: Upload signer asset return evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signer-asset-return-${{ github.run_id }}
+          path: artifacts/signer-asset-return-${{ github.run_id }}.log
+          if-no-files-found: warn
+          retention-days: 90

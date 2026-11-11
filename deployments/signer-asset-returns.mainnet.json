@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "averray.signer-asset-returns.v1",
+  "signer": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+  "returns": [
+    {
+      "key": "usdt-2026-11",
+      "asset": "0x000007C000000000000000000000000001200000",
+      "symbol": "USDt",
+      "decimals": 6,
+      "destination": "0xe30478EB20E5380849e96E0f1002821dacF339e5",
+      "maxRaw": "13000000",
+      "reason": "USDt sent to the signer by mistake on 2026-11-09",
+      "approvedBy": "Pascal",
+      "approvedAt": "2026-11-09"
+    }
+  ]
+}
