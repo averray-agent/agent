@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { Interface } from "ethers";
 import yaml from "js-yaml";
 import { validateAllowList, returnSignerAsset, parseArgs, planHash, NATIVE_FLOOR, deploymentAddresses } from "./return-signer-asset.mjs";
@@ -46,12 +45,15 @@ async function refuses(f, pattern) {
   assert.equal(f.calls.signs, 0, "no KMS signing on refusal");
   assert.equal(f.calls.sends.length, 0);
 }
-test("committed placeholder refuses before any network/AWS and exits nonzero", () => {
-  assert.equal(committed.returns[0].destination, "<PASCAL SUPPLIES — EVM H160>");
-  assert.throws(() => validateAllowList(committed, manifest), /placeholder/);
-  const cli = spawnSync(process.execPath, [new URL("./return-signer-asset.mjs", import.meta.url).pathname, "--profile", "mainnet", "--use-kms", "--expected-signer", manifest.verifier, "--key", "usdt-2026-11", "--amount", "10000"], { encoding: "utf8", timeout: 5000 });
-  assert.equal(cli.status, 1);
-  assert.match(cli.stderr, /placeholder/);
+test("committed destination is the operator-proven H160 and validates", () => {
+  // Pascal supplied SS58 121pEreu…EYhyv on 2026-11-09; its revive H160 showed nonce 200 on chain.
+  assert.equal(committed.returns[0].destination, "0xe30478EB20E5380849e96E0f1002821dacF339e5");
+  assert.equal(validateAllowList(committed, manifest).entries[0].destination, "0xe30478eb20e5380849e96e0f1002821dacf339e5");
+});
+test("a placeholder destination refuses before any network/AWS", () => {
+  const placeholder = structuredClone(committed);
+  placeholder.returns[0].destination = "<PASCAL SUPPLIES — EVM H160>";
+  assert.throws(() => validateAllowList(placeholder, manifest), /placeholder/);
 });
 test("allow-list rejects USDC explicitly", () => {
   const f = fixture(); f.allowList.returns[0].asset = manifest.contracts.token;

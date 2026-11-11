@@ -7,7 +7,7 @@
       "asset": "0x000007C000000000000000000000000001200000",
       "symbol": "USDt",
       "decimals": 6,
-      "destination": "<PASCAL SUPPLIES — EVM H160>",
+      "destination": "0xe30478EB20E5380849e96E0f1002821dacF339e5",
       "maxRaw": "13000000",
       "reason": "USDt sent to the signer by mistake on 2026-11-09",
       "approvedBy": "Pascal",
