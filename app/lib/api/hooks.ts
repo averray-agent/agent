@@ -86,6 +86,15 @@ export const useAdminSessions = () =>
 // The public directory excludes hosted canary identities. The authenticated
 // operator roster opts them back in so regression workers remain observable.
 export const useAgents = () => useApi("/agents?includeSynthetic=true");
+const PEOPLE_LITE_BATCH_LIMIT = 50;
+export const usePeopleLite = (wallets: string[]) => {
+  const unique = [...new Set(wallets.map((wallet) => wallet.toLowerCase()))]
+    .filter((wallet) => /^0x[a-f0-9]{40}$/u.test(wallet))
+    .slice(0, PEOPLE_LITE_BATCH_LIMIT);
+  return useBoundedApi(unique.length ? `/people/personhood?wallets=${unique.join(",")}` : null, {
+    publicRead: true,
+  });
+};
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
 type BadgePage = { items: unknown[]; nextCursor: string | null };

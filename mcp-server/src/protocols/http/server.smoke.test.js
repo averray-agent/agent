@@ -87,6 +87,8 @@ async function startServer(port, envOverrides = {}, execArgv = []) {
       AUTH_VERIFIER_WALLETS: VERIFIER_WALLET,
       OPERATOR_VIEWER_WALLETS: VIEWER_WALLET,
       STATE_STORE_ALLOW_MEMORY: "1",
+      // Personhood reads must not call a live Hub during smoke.
+      PEOPLE_LITE_SOURCE: "off",
       LOG_LEVEL: "silent",
       RATE_LIMIT_AUTH_NONCE_LIMIT: "3",
       RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60",

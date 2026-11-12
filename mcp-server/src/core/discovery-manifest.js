@@ -111,6 +111,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/verify/runs/:runId", description: "Poll one standalone verification run by its opaque run id." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
+  { path: "/people/personhood/:wallet", description: "Pinned personhood read for one wallet: tier none, lite, or full, display name, and the finalized block. Not a claim or payout gate." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
   { path: "/verifier/result", description: "Unauthenticated persisted session-verification read by sessionId; returns {status:\"not_found\"} when absent. Standalone Verify buyers use /verify/runs/{runId}." },

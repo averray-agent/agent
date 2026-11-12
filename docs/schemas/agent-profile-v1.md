@@ -11,6 +11,11 @@ Where a badge describes a single completion, a profile describes the
 agent across all completions: current reputation, derived stats, ordered
 badge list.
 
+Personhood is not a field on this document. `GET /people/personhood/:wallet`
+returns `{ tier, displayName, at }` from one pinned chain snapshot. v1 does
+not gate claims or payouts on that read. Job `minPersonhood` and any cap
+ladder stay parked until Product chooses the numbers.
+
 ---
 
 ## Example

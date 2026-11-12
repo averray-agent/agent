@@ -875,9 +875,11 @@ async function bootProfile() {
   setHref("profile-json-url", profileEndpoint);
   setHref("profile-loading-json-url", profileEndpoint);
   setText("profile-loading-json-url", profileEndpoint.replace(/^https:\/\//u, ""));
-  setText("profile-title", `Agent ${wallet.slice(0, 8)}…${wallet.slice(-4)}`);
-  document.title = `Averray — ${wallet.slice(0, 8)}…${wallet.slice(-4)}`;
+  const truncated = `${wallet.slice(0, 8)}…${wallet.slice(-4)}`;
+  setText("profile-title", `Agent ${truncated}`);
+  document.title = `Averray — ${truncated}`;
 
+  let loaded = false;
   try {
     const profile = await window.AverrayReaderFetch.readJsonWithRetry(profileEndpoint, {
       headers: { accept: "application/json" }
@@ -907,9 +909,47 @@ async function bootProfile() {
     const content = byId("profile-content");
     if (content) content.hidden = false;
     if (loading) loading.hidden = true;
+    loaded = true;
   } catch (error) {
     showProfileFailure(loading, profileEndpoint, error);
   }
+  if (!loaded) return;
+
+  try {
+    const personhood = await window.AverrayReaderFetch.readJsonWithRetry(
+      `https://api.averray.com/people/personhood/${wallet}`,
+      { headers: { accept: "application/json" } }
+    );
+    applyPersonhood(wallet, personhood);
+  } catch {
+    // A missing pin keeps today's truncated address. It is not a none tier.
+  }
+}
+
+function applyPersonhood(wallet, personhood) {
+  if (!personhood || personhood.available === false) return;
+  if (personhood.tier !== "none" && personhood.tier !== "lite" && personhood.tier !== "full") return;
+  const truncated = `${wallet.slice(0, 8)}…${wallet.slice(-4)}`;
+  const name = typeof personhood.line?.text === "string" && personhood.line.text.trim()
+    ? personhood.line.text.trim()
+    : "";
+  setText("profile-title", name || `Agent ${truncated}`);
+  document.title = name ? `Averray — ${name}` : `Averray — ${truncated}`;
+  const pill = byId("profile-personhood");
+  if (!pill) return;
+  const kind = personhood.line?.pill;
+  if (kind !== "lite" && kind !== "full" && kind !== "suspended") {
+    pill.hidden = true;
+    pill.textContent = "";
+    pill.removeAttribute?.("title");
+    return;
+  }
+  pill.hidden = false;
+  pill.textContent = kind;
+  pill.className = `status-pill ${kind === "full" ? "ok" : "warn"}`;
+  const tooltip = typeof personhood.line?.tooltip === "string" ? personhood.line.tooltip : "";
+  pill.setAttribute("title", tooltip);
+  pill.setAttribute("aria-label", tooltip || `Personhood ${kind}`);
 }
 
 bootProfile();

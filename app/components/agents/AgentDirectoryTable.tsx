@@ -3,7 +3,9 @@
 import { cn } from "@/lib/utils/cn";
 import { publicProfileUrl } from "@/lib/agents/public-profile";
 import { formatDeadline } from "@/components/runs/buildLifecycleStages";
+import { personhoodFor, personhoodLineText } from "@/lib/agents/personhood-line";
 import { BadgeStrip } from "./BadgeStrip";
+import { PersonhoodPill } from "./PersonhoodPill";
 import { TierChip } from "./TierChip";
 import type { AgentRecord, AgentActiveSession } from "./types";
 
@@ -18,6 +20,8 @@ export interface AgentDirectoryTableProps {
   onToggleCompare: (agent: AgentRecord) => void;
   /** True when the comparison cap is reached — disables unchecked boxes. */
   compareFull: boolean;
+  /** Pinned personhood reads keyed by lowercase wallet. Missing keys keep the truncated address. */
+  personhood?: Record<string, unknown>;
 }
 
 // State pill palette. Lifecycle-position tones:
@@ -60,6 +64,7 @@ export function AgentDirectoryTable({
   comparing,
   onToggleCompare,
   compareFull,
+  personhood,
 }: AgentDirectoryTableProps) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]">
@@ -107,6 +112,7 @@ export function AgentDirectoryTable({
                 const selected = a.handle === selectedHandle;
                 const activityParts = a.activity.msg.split(a.activity.ref);
                 const profileHref = publicProfileUrl(a.walletFull);
+                const signal = personhoodFor(personhood, a.walletFull);
                 return (
                   <tr
                     key={a.handle}
@@ -145,10 +151,11 @@ export function AgentDirectoryTable({
                             : "Identity unknown"}
                       </span>
                       <div
-                        className="mt-0.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+                        className="mt-0.5 flex flex-wrap items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
                         style={{ letterSpacing: 0 }}
                       >
-                        {a.wallet}
+                        <span>{personhoodLineText(signal, a.wallet)}</span>
+                        <PersonhoodPill read={signal} />
                       </div>
                       {profileHref ? (
                         <a

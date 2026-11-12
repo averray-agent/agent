@@ -67,6 +67,7 @@ const ROOT_ENDPOINTS = [
   "/jobs/tiers",
   "/agents",
   "/agents/:wallet",
+  "/people/personhood/:wallet",
   "/shares",
   "/shares/:token",
   "/badges",
