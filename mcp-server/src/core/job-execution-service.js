@@ -595,7 +595,7 @@ export class JobExecutionService {
         if (this.isTerminalSession(refreshed)) {
           const refreshedSessions = await this.listJobSessions(jobId);
           if (refreshed.status === "expired" && !this.isRetryExhausted(job, countClaimAttempts(refreshedSessions))) {
-            await this.reopenExpiredClaim(jobId);
+            await this.reopenExpiredClaim(jobId, refreshed);
           } else {
             throw new ConflictError(
               `Job ${jobId} already has a completed session for this wallet. Create or select a different job to run again.`,
@@ -635,7 +635,7 @@ export class JobExecutionService {
         if (refreshed.status === "expired") {
           const refreshedSessions = await this.listJobSessions(jobId);
           if (!this.isRetryExhausted(job, countClaimAttempts(refreshedSessions))) {
-            await this.reopenExpiredClaim(jobId);
+            await this.reopenExpiredClaim(jobId, refreshed);
           } else {
             throw new ConflictError(
               `Job ${jobId} exhausted its claim retry budget.`,
@@ -1733,9 +1733,72 @@ export class JobExecutionService {
     return persisted;
   }
 
-  async reopenExpiredClaim(jobId) {
-    if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.handleClaimTimeout === "function") {
+  async reopenExpiredClaim(jobId, expiredSession, { now = new Date() } = {}) {
+    if (!this.blockchainGateway?.isEnabled()) return;
+    if (
+      typeof this.blockchainGateway.getJob !== "function"
+      || typeof this.blockchainGateway.handleClaimTimeout !== "function"
+    ) {
+      throw new ConflictError(
+        "The blockchain gateway cannot reconcile expired claims.",
+        "claim_timeout_unavailable",
+        { jobId }
+      );
+    }
+
+    // Local expiry is historical evidence, not permission to mutate a newer
+    // chain state. A sweeper or another caller may already have reopened it.
+    let live = await this.blockchainGateway.getJob(jobId);
+    if (Number(live?.state) === ESCROW_JOB_STATE_OPEN) return;
+    if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
+      throw new ConflictError(
+        "The on-chain job is not an expired claim that can be reopened.",
+        "job_not_claimable",
+        { jobId, liveState: live?.state }
+      );
+    }
+    if (!walletsEqual(live?.worker, expiredSession?.wallet)) {
+      throw new ConflictError(
+        "The expired session does not match the live escrow claimant.",
+        "claim_reconciliation_worker_mismatch",
+        { jobId, sessionId: expiredSession?.sessionId }
+      );
+    }
+    const nowMs = new Date(now).getTime();
+    if (!Number.isFinite(nowMs)) {
+      throw new ValidationError("Claim reconciliation clock is invalid.");
+    }
+    // Never fall back to a local deadline when deciding to send a transaction.
+    const expirySeconds = Number(live?.claimExpiry ?? live?.claimExpiryRaw);
+    if (!Number.isSafeInteger(expirySeconds) || expirySeconds <= 0 || expirySeconds * 1000 >= nowMs) {
+      throw new ConflictError(
+        "The live escrow claim has not reached a verified expiry.",
+        "claim_not_expired",
+        { jobId }
+      );
+    }
+
+    try {
       await this.blockchainGateway.handleClaimTimeout(jobId);
+    } catch (error) {
+      // A competing timeout can succeed between the read and this transaction.
+      // Accept only its observed Open result; never retry the timeout here.
+      let observed;
+      try {
+        observed = await this.blockchainGateway.getJob(jobId);
+      } catch {
+        throw error;
+      }
+      if (Number(observed?.state) === ESCROW_JOB_STATE_OPEN) return;
+      throw error;
+    }
+    live = await this.blockchainGateway.getJob(jobId);
+    if (Number(live?.state) !== ESCROW_JOB_STATE_OPEN) {
+      throw new ConflictError(
+        "Claim timeout returned without reopening the on-chain job.",
+        "claim_timeout_not_reopened",
+        { jobId, liveState: live?.state }
+      );
     }
   }
 
