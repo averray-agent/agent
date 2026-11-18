@@ -35,7 +35,7 @@
     "ajv": "^8.20.0",
     "ethers": "^6.17.0",
     "redis": "^5.11.0",
-    "ws": "^8.18.3"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@noble/curves": "^2.2.0",
