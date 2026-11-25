@@ -3,6 +3,16 @@ name: Hosted Signer Cleanup
 on:
   workflow_dispatch:
     inputs:
+      manifest:
+        description: Reviewed cleanup manifest key
+        required: true
+        type: choice
+        options:
+          - select-a-manifest
+          - "2026-10"
+          - "2026-11-1"
+          - "2026-11-2"
+          - "2026-11-3"
       commit:
         description: Stop only the backend and execute a reviewed cleanup plan. False is read-only.
         type: boolean
@@ -35,10 +45,13 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_PORT: ${{ secrets.VPS_PORT }}
       VPS_USER: ${{ secrets.VPS_USER }}
+      CLEANUP_MANIFEST: ${{ inputs.manifest }}
       CLEANUP_COMMIT: ${{ inputs.commit && '1' || '0' }}
       CLEANUP_PLAN_HASH: ${{ inputs.expected_plan_hash }}
       CLEANUP_CONFIRM: ${{ inputs.confirm }}
     steps:
+      - name: Require a manifest selection
+        run: test -n "$CLEANUP_MANIFEST" && test "$CLEANUP_MANIFEST" != select-a-manifest
       - name: Load prod-ci SSH key
         uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
         with:
@@ -64,8 +77,8 @@ jobs:
       - name: Run reviewed cleanup with host maintenance boundary
         run: |
           set -euo pipefail
-          remote_env=$(printf 'CLEANUP_RUN_ID=%q CLEANUP_COMMIT=%q CLEANUP_PLAN_HASH=%q CLEANUP_CONFIRM=%q ' \
-            "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "$CLEANUP_COMMIT" "$CLEANUP_PLAN_HASH" "$CLEANUP_CONFIRM")
+          remote_env=$(printf 'CLEANUP_MANIFEST=%q CLEANUP_RUN_ID=%q CLEANUP_COMMIT=%q CLEANUP_PLAN_HASH=%q CLEANUP_CONFIRM=%q ' \
+            "$CLEANUP_MANIFEST" "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "$CLEANUP_COMMIT" "$CLEANUP_PLAN_HASH" "$CLEANUP_CONFIRM")
           ssh -p "${VPS_PORT:-22}" -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
             "$VPS_USER@$VPS_HOST" \
             "${remote_env} bash /srv/agent-stack/app/scripts/ops/run-signer-cleanup-host.sh" \
@@ -76,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          remote_env=$(printf 'CLEANUP_RUN_ID=%q CLEANUP_COMMIT=1 ' "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          remote_env=$(printf 'CLEANUP_MANIFEST=%q CLEANUP_RUN_ID=%q CLEANUP_COMMIT=1 ' "$CLEANUP_MANIFEST" "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
           ssh -p "${VPS_PORT:-22}" -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
             "$VPS_USER@$VPS_HOST" \
             "${remote_env} bash /srv/agent-stack/app/scripts/ops/run-signer-cleanup-host.sh --recover" \

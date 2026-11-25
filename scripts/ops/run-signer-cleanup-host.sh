@@ -30,7 +30,7 @@ container=$(printf '%s' "$target" | jq -er '.backendContainer')
 compose=(sudo docker compose --project-directory "$project" -f "$compose_file")
 signer=$(jq -er '.verifier' "$APP_ROOT/deployments/mainnet.json")
 mounts=(-v "$APP_ROOT/scripts:/app/scripts:ro" -v "$APP_ROOT/deployments:/app/deployments:ro" -v "$APP_ROOT/mcp-server:/app/mcp-server:ro")
-mode=(--profile mainnet --expected-signer "$signer")
+mode=(--manifest "${CLEANUP_MANIFEST:-}" --profile mainnet --expected-signer "$signer")
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 nonce() {
   timeout 25s "${compose[@]}" run --rm --no-deps -T "${mounts[@]}" "$service" \
