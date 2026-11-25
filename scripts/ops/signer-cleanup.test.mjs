@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
@@ -9,7 +10,7 @@ import { Interface, id } from "ethers";
 import YAML from "js-yaml";
 import { ESCROW_CORE_ABI, AGENT_ACCOUNT_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { ADDRESSES, COLD_POSTER, DENYLIST, STRATEGY_ID, EVENTS, assertAllowedId, assertCommit, assertNonceIdle,
-  buildPlan as planForManifest, loadManifest, MANIFEST_FILES, rescueCommands, reportDryRun, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
+  main, CHAIN_ID, buildPlan as planForManifest, loadManifest, MANIFEST_FILES, rescueCommands, reportDryRun, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
   readRejectionEvidence, slashDistribution, createReader, simulateReadyRow } from "./signer-cleanup.mjs";
 import { parseArgs as rescueArgs, runRescueBatch, rescueBatchHash, sendCall } from "./rescue-open-job.mjs";
 
@@ -540,7 +541,7 @@ test("workflow explicitly selects from the same manifest keys as the CLI", async
   }
 });
 
-test("reader reports the catalogue or session ID on blocked rows and requires persisted retirement to simulate", async () => {
+function openJobProvider() {
   const iface = new Interface([...ESCROW_CORE_ABI, "function createdAt(bytes32) view returns (uint256)",
     "function MIN_OPEN_FOR_CANCEL() view returns (uint256)", "function paused() view returns (bool)",
     "function policy() view returns (address)", "function escrowOperators(address) view returns (bool)"]);
@@ -555,6 +556,12 @@ test("reader reports the catalogue or session ID on blocked rows and requires pe
     if (fn === "cancelOpenJob") { simulations++; return "0x"; }
     return iface.encodeFunctionResult(fn, [values[fn]]);
   } };
+  return { provider, simulations: () => simulations };
+}
+
+test("reader reports the catalogue or session ID on blocked rows and requires persisted retirement to simulate", async () => {
+  const { provider, simulations } = openJobProvider();
+  const policy = ADDRESSES.adapter;
   const r = { ...row("A"), jobId: id("catalogue-job") };
   let records = [], session;
   const reader = await createReader(provider, { contracts: { treasuryPolicy: policy } }, {
@@ -567,7 +574,7 @@ test("reader reports the catalogue or session ID on blocked rows and requires pe
     assert.equal(result.status, "blocked");
     assert.equal(result.catalogueId, catalogueId);
     assert.equal(result.hasCatalogueRecord, hasCatalogueRecord);
-    assert.equal(simulations, 0);
+    assert.equal(simulations(), 0);
   };
   await blocked("not reported", false);
   const unresolved = await reader.read(r);
@@ -586,5 +593,63 @@ test("reader reports the catalogue or session ID on blocked rows and requires pe
     records[0].lifecycle.status = status;
     assert.equal((await reader.read(r)).status, "ready");
   }
-  assert.equal(simulations, 2);
+  assert.equal(simulations(), 2);
+});
+
+
+test("a different job's persisted retirement cannot authorize this cancellation", async () => {
+  const { provider, simulations } = openJobProvider();
+  const candidate = { ...row("A"), jobId: id("still-open") };
+  for (const status of ["paused", "archived"]) {
+    const records = [{ schemaVersion: 1, jobId: "another-job", lifecycle: { status } }];
+    const reader = await createReader(provider, { contracts: { treasuryPolicy: ADDRESSES.adapter } }, {
+      readRetirements: async () => records
+    });
+    const result = await reader.read(candidate);
+    assert.equal(result.status, "blocked");
+    assert.equal(result.reason, "persisted_catalogue_retirement_required");
+    assert.equal(result.catalogueId, "not reported");
+    assert.equal(simulations(), 0);
+    assert.equal(retirementFor(records, candidate.jobId), false);
+  }
+});
+
+test("main reads the requested batch and refuses a different batch's hash before constructing KMS", async () => {
+  let signerConstructions = 0;
+  let retired = false;
+  const deps = {
+    makeProvider: () => ({
+      send: async method => { assert.equal(method, "eth_chainId"); return CHAIN_ID; },
+      destroy() {}
+    }),
+    makeReader: () => ({
+      read: async row => classify(row, snapshot("A", { retired })),
+      position: async () => position
+    }),
+    makeSigner: () => { signerConstructions++; throw new Error("unexpected KMS construction"); },
+    log() {}
+  };
+  const argv = key => ["--profile", "mainnet", "--manifest", key];
+  // With no ready rows, only manifest identity can distinguish these hashes.
+  const plans = [];
+  for (const key of ["2026-11-1", "2026-11-2"]) {
+    const plan = await main(argv(key), deps);
+    const file = await readFile(new URL(`./signer-cleanup-${key}.json`, import.meta.url));
+    assert.deepEqual(plan.rows.map(result => result.row), JSON.parse(file).rows);
+    assert.equal(plan.manifestKey, key);
+    assert.equal(plan.manifestSha256, createHash("sha256").update(file).digest("hex"));
+    plans.push(plan);
+  }
+  const [first, second] = plans;
+  assert.notDeepEqual(first.rows, second.rows);
+  assert.notEqual(first.planHash, second.planHash);
+  // Now allow every row through retirement so a commit could reach KMS.
+  retired = true;
+  const readyFirst = await main(argv("2026-11-1"), deps);
+  const readySecond = await main(argv("2026-11-2"), deps);
+  assert.ok(readySecond.rows.every(row => row.status === "ready"));
+  const { expectedPlanHash, confirm } = commitArgs(readyFirst);
+  await assert.rejects(main([...argv("2026-11-2"), "--commit", "--use-kms", "--expected-signer",
+    ADDRESSES.signer, "--expected-plan-hash", expectedPlanHash, "--confirm", confirm], deps), /Plan hash mismatch/);
+  assert.equal(signerConstructions, 0);
 });

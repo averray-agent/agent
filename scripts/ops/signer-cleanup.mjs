@@ -416,7 +416,19 @@ export function reportDryRun(plan, catalogueStoreAvailable, log) {
   });
 }
 
-export async function main(argv = process.argv.slice(2)) {
+function rpcProvider(request) {
+  return new JsonRpcProvider(request, CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 });
+}
+
+async function kmsSigner(provider) {
+  const { KmsSigner } = await import("../../mcp-server/src/blockchain/kms-signer.js");
+  return new KmsSigner({ keyId: process.env.KMS_KEY_ID, region: process.env.AWS_REGION, provider });
+}
+
+export async function main(argv = process.argv.slice(2), {
+  makeProvider = rpcProvider, makeReader = createReader, makeSigner = kmsSigner,
+  log = value => console.log(json(value))
+} = {}) {
   const args = parseArgs(argv);
   const deployments = JSON.parse(await readFile(new URL("../../deployments/mainnet.json", import.meta.url), "utf8"));
   const selection = await loadManifest(args.manifestKey);
@@ -427,9 +439,8 @@ export async function main(argv = process.argv.slice(2)) {
     if (!equal(deployments.contracts[key], ADDRESSES[name])) throw new Error(`Deployment binding changed: ${key}`);
   }
   const request = new FetchRequest(deployments.rpcUrl); request.timeout = 10_000;
-  const provider = new JsonRpcProvider(request, CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 });
+  const provider = makeProvider(request);
   let store;
-  const log = (value) => console.log(json(value));
   try {
     if (Number(BigInt(await provider.send("eth_chainId", []))) !== CHAIN_ID) throw new Error("Wrong chain");
     if (args.nonceCheck) { log({ type: "signer_nonce", at: new Date().toISOString(), ...await assertNonceIdle(provider) }); return; }
@@ -438,7 +449,7 @@ export async function main(argv = process.argv.slice(2)) {
       const { createStateStore } = await import("../../mcp-server/src/core/state-store.js");
       store = createStateStore();
     }
-    const io = await createReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]),
+    const io = await makeReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]),
       readSession: store ? jobId => store.findSessionByChainJobId(jobId) : undefined });
     const rows = [];
     for (const row of manifest.rows) { const result = await io.read(row); rows.push(result); log({ type: "row", ...result }); }
@@ -454,8 +465,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (!plan.rows.some(r => r.status === "ready")) { log({ type: "no_op", reason: "no_ready_rows" }); return plan; }
     await assertNonceIdle(provider);
     // Dynamic import and signer construction occur only AFTER all commit gates.
-    const { KmsSigner } = await import("../../mcp-server/src/blockchain/kms-signer.js");
-    const signer = new KmsSigner({ keyId: process.env.KMS_KEY_ID, region: process.env.AWS_REGION, provider });
+    const signer = await makeSigner(provider);
     if (!equal(await signer.getAddress(), expected)) throw new Error("KMS signer mismatch");
     return await executePlan(plan, args, { ...io, now: Date.now, log, assertNonceIdle: () => assertNonceIdle(provider),
       send: (call) => new Contract(call.to, call.function === "deallocateIdleFunds" ? accountAbi : escrowAbi, signer)[call.function](...call.args) });
