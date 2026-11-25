@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
@@ -9,13 +10,15 @@ import { Interface, id } from "ethers";
 import YAML from "js-yaml";
 import { ESCROW_CORE_ABI, AGENT_ACCOUNT_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { ADDRESSES, COLD_POSTER, DENYLIST, STRATEGY_ID, EVENTS, assertAllowedId, assertCommit, assertNonceIdle,
-  buildPlan, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
+  main, CHAIN_ID, buildPlan as planForManifest, loadManifest, MANIFEST_FILES, rescueCommands, reportDryRun, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
   readRejectionEvidence, slashDistribution, createReader, simulateReadyRow } from "./signer-cleanup.mjs";
 import { parseArgs as rescueArgs, runRescueBatch, rescueBatchHash, sendCall } from "./rescue-open-job.mjs";
 
 const exec = promisify(execFile);
 const root = new URL("../../", import.meta.url);
 const manifest = JSON.parse(await readFile(new URL("./signer-cleanup-2026-10.json", import.meta.url)));
+const october = await loadManifest("2026-10");
+const buildPlan = (rows, position) => planForManifest(rows, position, october);
 const row = bucket => manifest.rows.find(r => r.bucket === bucket);
 const now = 2_000_000;
 const position = { liquid: "100", reserved: "999999999" };
@@ -141,9 +144,9 @@ test("pending nonce refuses all sending; wrong profile and unconfirmed commit re
   assert.deepEqual(tags, ["latest", "pending"]);
   const h = harness(); h.io.assertNonceIdle = async () => { throw new Error("signer_nonce_busy"); };
   await assert.rejects(executePlan(h.plan, commitArgs(h.plan), h.io), /nonce_busy/); assert.equal(h.sent.length, 0);
-  assert.equal(parseArgs(["--profile", "mainnet"]).commit, false);
-  assert.throws(() => parseArgs(["--profile", "testnet"]));
-  assert.throws(() => parseArgs(["--profile", "mainnet", "--commit"]));
+  assert.equal(parseArgs(["--manifest", "2026-10", "--profile", "mainnet"]).commit, false);
+  assert.throws(() => parseArgs(["--manifest", "2026-10", "--profile", "testnet"]));
+  assert.throws(() => parseArgs(["--manifest", "2026-10", "--profile", "mainnet", "--commit"]));
 });
 test("receipt must match expected event, contract and job", () => {
   const iface = new Interface(["event JobCancelled(bytes32 indexed jobId,address indexed poster,uint256 refundedRaw)"]);
@@ -226,11 +229,11 @@ else /bin/date "$@"; fi`);
   const hash = "a".repeat(64);
   return { dir, logFile, args: [new URL("./run-signer-cleanup-host.sh", import.meta.url).pathname],
     env: { ...process.env, PATH: `${bin}:/opt/homebrew/bin:/usr/bin:/bin`, STACK_ROOT: dir, TEST_LOG: logFile,
-      DEPLOY_LOCK_FILE: path.join(dir, "lock"), CLEANUP_RUN_ID: "123-1", CLEANUP_COMMIT: mode.commit ? "1" : "0", CLEANUP_PLAN_HASH: hash, CLEANUP_CONFIRM: `CLEANUP ${hash.slice(0, 12)}` } };
+      DEPLOY_LOCK_FILE: path.join(dir, "lock"), CLEANUP_MANIFEST: "2026-11-2", CLEANUP_RUN_ID: "123-1", CLEANUP_COMMIT: mode.commit ? "1" : "0", CLEANUP_PLAN_HASH: hash, CLEANUP_CONFIRM: `CLEANUP ${hash.slice(0, 12)}` } };
 }
 test("host dry-run never stops, starts or invokes KMS", async t => {
   const h = await hostFixture(t); await exec("bash", h.args, { env: h.env });
-  const calls = await readFile(h.logFile, "utf8"); assert.doesNotMatch(calls, /\bstop\b|\bstart\b|--use-kms|--commit/); assert.match(calls, /run --rm --no-deps/);
+  const calls = await readFile(h.logFile, "utf8"); assert.doesNotMatch(calls, /\bstop\b|\bstart\b|--use-kms|--commit/); assert.match(calls, /run --rm --no-deps/); assert.match(calls, /--manifest 2026-11-2/);
 });
 test("host refuses held deploy lock and leaves backend running", async t => {
   const h = await hostFixture(t, { commit: true, lockHeld: true });
@@ -462,4 +465,191 @@ test("phantom and duplicate rejection logs cannot change the reviewed plan or se
   assert.equal(h.sent.length, 1, "RPC noise must not skip a reviewed ready row");
   const changed = structuredClone(noisy); changed.preState.job.claimStake = "999";
   assert.notEqual(h.plan.planHash, buildPlan([changed], position).planHash);
+});
+
+test("CLI rejects missing, unlisted, inherited and path-like manifest keys before setup", async () => {
+  const { main } = await import("./signer-cleanup.mjs");
+  for (const key of [undefined, "invalid", "constructor", "../signer-cleanup-2026-10.json"]) {
+    await assert.rejects(main(["--profile", "mainnet", ...(key ? ["--manifest", key] : [])]), /required --manifest key/i);
+  }
+});
+
+test("reviewed November batches contain the exact disjoint v3 cancellations and October retains its exact bytes", async () => {
+  assert.equal(october.manifestSha256, "dd140f0655997bc4f2b2b3d6a8d8db9b042a5da5f996da85448b5d7083d90e94");
+  const ids = new Set([...manifest.rows.map(r => r.jobId), ...manifest.rescueJobIds]);
+  const pins = [
+    "e66b57476a933ab9d8c547715a343e657e365b392f7423a4673ecc51d09f842a",
+    "1285f1d4f2f3788a68fe88ae9eff95aef810d521ca0f8d74e207a2ef428e7efa",
+    "c71c72e67d1ef31dc328a7e54f209ffc7e9c08ea15bfc9fd979d4945e1601655"
+  ];
+  for (const [index, pin] of pins.entries()) {
+    const key = `2026-11-${index + 1}`;
+    const loaded = await loadManifest(key);
+    assert.equal(loaded.manifestSha256, pin);
+    assert.equal(loaded.manifest.rows.length, [16, 16, 15][index]);
+    assert.deepEqual(loaded.manifest.rescueJobIds, []);
+    assert.equal(rescueCommands(loaded.manifest), null);
+    for (const r of loaded.manifest.rows) {
+      assert.deepEqual(r, { bucket: "A", escrow: "v3", function: "cancelOpenJob", jobId: r.jobId });
+      assert.ok(!ids.has(r.jobId), r.jobId);
+      ids.add(r.jobId);
+    }
+    for (const prefix of Object.keys(DENYLIST)) {
+      const edited = structuredClone(loaded.manifest);
+      edited.rows[0].jobId = prefix.padEnd(66, "0");
+      await assert.rejects(loadManifest(key, async () => Buffer.from(JSON.stringify(edited))), /Denied/);
+    }
+    for (const edit of [{ rows: [row("B")] }, { rescueJobIds: manifest.rescueJobIds }]) {
+      await assert.rejects(loadManifest(key, async () => Buffer.from(JSON.stringify({ ...loaded.manifest, ...edit }))), /only bucket A/);
+    }
+  }
+  assert.ok(rescueCommands(manifest).prepare.includes("--phase prepare"));
+});
+
+test("commit refuses a different batch or changed file bytes even with identical ready calls", async () => {
+  const first = await loadManifest("2026-11-1");
+  const second = await loadManifest("2026-11-2");
+  const h = harness([ready("A")]);
+  const plan = selection => planForManifest(h.plan.rows, position, selection);
+  const reviewed = commitArgs(plan(first));
+  const changed = await loadManifest("2026-11-1", async url => Buffer.concat([await readFile(url), Buffer.from("\n")]));
+  for (const selection of [second, { ...first, manifestKey: second.manifestKey }, changed]) {
+    await assert.rejects(executePlan(plan(selection), reviewed, h.io), /Plan hash mismatch/);
+    assert.deepEqual(h.sent, []);
+  }
+});
+
+test("an open reviewed job claimed before its send-time read is skipped", async () => {
+  const h = harness([ready("A")]);
+  h.io.read = async r => classify(r, snapshot("A", { job: { state: 2 } }));
+  const outcome = await executePlan(h.plan, commitArgs(h.plan), h.io);
+  assert.equal(outcome.skipped[0].reason, "not_open");
+  assert.deepEqual(h.sent, []);
+});
+
+test("workflow explicitly selects from the same manifest keys as the CLI", async () => {
+  const w = YAML.load(await readFile(new URL(".github/workflows/hosted-signer-cleanup.yml", root), "utf8"));
+  const choice = w.on.workflow_dispatch.inputs.manifest;
+  assert.equal(choice.type, "choice");
+  assert.equal(choice.required, true);
+  assert.equal(choice.default, undefined);
+  assert.deepEqual(choice.options, ["select-a-manifest", ...Object.keys(MANIFEST_FILES)]);
+  assert.equal(w.jobs.cleanup.env.CLEANUP_MANIFEST, "${{ inputs.manifest }}");
+  for (const step of w.jobs.cleanup.steps.filter(s => s.run?.includes("run-signer-cleanup-host.sh"))) {
+    assert.match(step.run, /CLEANUP_MANIFEST=%q/);
+    assert.match(step.run, /"\$CLEANUP_MANIFEST" "\$GITHUB_RUN_ID-\$GITHUB_RUN_ATTEMPT"/);
+  }
+});
+
+function openJobProvider() {
+  const iface = new Interface([...ESCROW_CORE_ABI, "function createdAt(bytes32) view returns (uint256)",
+    "function MIN_OPEN_FOR_CANCEL() view returns (uint256)", "function paused() view returns (bool)",
+    "function policy() view returns (address)", "function escrowOperators(address) view returns (bool)"]);
+  const policy = ADDRESSES.adapter;
+  const fixture = snapshot("A", { job: { rejectingVerifier: ADDRESSES.signer } }).job;
+  const jobs = Object.fromEntries(iface.getFunction("jobs").outputs[0].components.map(c =>
+    [c.name, fixture[c.name] ?? (c.type === "bool" ? false : c.type === "bytes32" ? id(c.name) : 0)]));
+  const values = { jobs, policy, accounts: ADDRESSES.aac, paused: false, escrowOperators: true, createdAt: 1, MIN_OPEN_FOR_CANCEL: 100 };
+  let simulations = 0;
+  const provider = { getBlock: async () => ({ number: 50, timestamp: now }), call: async tx => {
+    const fn = iface.parseTransaction(tx).name;
+    if (fn === "cancelOpenJob") { simulations++; return "0x"; }
+    return iface.encodeFunctionResult(fn, [values[fn]]);
+  } };
+  return { provider, simulations: () => simulations };
+}
+
+test("reader reports the catalogue or session ID on blocked rows and requires persisted retirement to simulate", async () => {
+  const { provider, simulations } = openJobProvider();
+  const policy = ADDRESSES.adapter;
+  const r = { ...row("A"), jobId: id("catalogue-job") };
+  let records = [], session;
+  const reader = await createReader(provider, { contracts: { treasuryPolicy: policy } }, {
+    readRetirements: async () => records,
+    readSession: async chainId => { assert.equal(chainId, r.jobId); return session; }
+  });
+  const blocked = async (catalogueId, hasCatalogueRecord) => {
+    const result = await reader.read(r);
+    assert.equal(result.reason, "persisted_catalogue_retirement_required");
+    assert.equal(result.status, "blocked");
+    assert.equal(result.catalogueId, catalogueId);
+    assert.equal(result.hasCatalogueRecord, hasCatalogueRecord);
+    assert.equal(simulations(), 0);
+  };
+  await blocked("not reported", false);
+  const unresolved = await reader.read(r);
+  session = { jobId: "session-job", lifecycle: { status: "archived" } };
+  await blocked("session-job", false);
+  records = [{ schemaVersion: 1, jobId: "catalogue-job", lifecycle: { status: "active" } }];
+  await blocked("catalogue-job", true);
+  const reported = [];
+  const plan = buildPlan([unresolved, await reader.read(r)], position);
+  reportDryRun(plan, true, entry => reported.push(entry));
+  assert.equal(reported[0].missingCatalogueRecordCount, 1);
+  assert.match(reported[0].catalogueNote, /stop and report/i);
+  reportDryRun(plan, false, entry => reported.push(entry));
+  assert.equal(reported[1].missingCatalogueRecordCount, null);
+  for (const status of ["paused", "archived"]) {
+    records[0].lifecycle.status = status;
+    assert.equal((await reader.read(r)).status, "ready");
+  }
+  assert.equal(simulations(), 2);
+});
+
+
+test("a different job's persisted retirement cannot authorize this cancellation", async () => {
+  const { provider, simulations } = openJobProvider();
+  const candidate = { ...row("A"), jobId: id("still-open") };
+  for (const status of ["paused", "archived"]) {
+    const records = [{ schemaVersion: 1, jobId: "another-job", lifecycle: { status } }];
+    const reader = await createReader(provider, { contracts: { treasuryPolicy: ADDRESSES.adapter } }, {
+      readRetirements: async () => records
+    });
+    const result = await reader.read(candidate);
+    assert.equal(result.status, "blocked");
+    assert.equal(result.reason, "persisted_catalogue_retirement_required");
+    assert.equal(result.catalogueId, "not reported");
+    assert.equal(simulations(), 0);
+    assert.equal(retirementFor(records, candidate.jobId), false);
+  }
+});
+
+test("main reads the requested batch and refuses a different batch's hash before constructing KMS", async () => {
+  let signerConstructions = 0;
+  let retired = false;
+  const deps = {
+    makeProvider: () => ({
+      send: async method => { assert.equal(method, "eth_chainId"); return CHAIN_ID; },
+      destroy() {}
+    }),
+    makeReader: () => ({
+      read: async row => classify(row, snapshot("A", { retired })),
+      position: async () => position
+    }),
+    makeSigner: () => { signerConstructions++; throw new Error("unexpected KMS construction"); },
+    log() {}
+  };
+  const argv = key => ["--profile", "mainnet", "--manifest", key];
+  // With no ready rows, only manifest identity can distinguish these hashes.
+  const plans = [];
+  for (const key of ["2026-11-1", "2026-11-2"]) {
+    const plan = await main(argv(key), deps);
+    const file = await readFile(new URL(`./signer-cleanup-${key}.json`, import.meta.url));
+    assert.deepEqual(plan.rows.map(result => result.row), JSON.parse(file).rows);
+    assert.equal(plan.manifestKey, key);
+    assert.equal(plan.manifestSha256, createHash("sha256").update(file).digest("hex"));
+    plans.push(plan);
+  }
+  const [first, second] = plans;
+  assert.notDeepEqual(first.rows, second.rows);
+  assert.notEqual(first.planHash, second.planHash);
+  // Now allow every row through retirement so a commit could reach KMS.
+  retired = true;
+  const readyFirst = await main(argv("2026-11-1"), deps);
+  const readySecond = await main(argv("2026-11-2"), deps);
+  assert.ok(readySecond.rows.every(row => row.status === "ready"));
+  const { expectedPlanHash, confirm } = commitArgs(readyFirst);
+  await assert.rejects(main([...argv("2026-11-2"), "--commit", "--use-kms", "--expected-signer",
+    ADDRESSES.signer, "--expected-plan-hash", expectedPlanHash, "--confirm", confirm], deps), /Plan hash mismatch/);
+  assert.equal(signerConstructions, 0);
 });

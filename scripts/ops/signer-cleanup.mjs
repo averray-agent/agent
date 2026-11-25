@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Operator-only October sweep. This module never starts the backend or its keepers.
+// Operator-only reviewed cleanup. This module never starts the backend or its keepers.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
@@ -59,6 +59,30 @@ function canonical(v) {
   return typeof v === "bigint" ? v.toString() : v;
 }
 export const hash = (v) => createHash("sha256").update(JSON.stringify(canonical(v))).digest("hex");
+export const MANIFEST_FILES = Object.freeze({
+  "2026-10": "signer-cleanup-2026-10.json",
+  "2026-11-1": "signer-cleanup-2026-11-1.json",
+  "2026-11-2": "signer-cleanup-2026-11-2.json",
+  "2026-11-3": "signer-cleanup-2026-11-3.json"
+});
+
+function manifestFile(key) {
+  if (!Object.hasOwn(MANIFEST_FILES, key)) {
+    throw new Error(`Required --manifest key: choose ${Object.keys(MANIFEST_FILES).join(", ")}`);
+  }
+  return new URL(MANIFEST_FILES[key], import.meta.url);
+}
+
+export async function loadManifest(key, read = readFile) {
+  const bytes = await read(manifestFile(key));
+  const manifest = JSON.parse(bytes);
+  validateManifest(manifest);
+  if (key !== "2026-10" && (manifest.rows.some(row => row.bucket !== "A") || manifest.rescueJobIds?.length !== 0)) {
+    throw new Error("November cleanup permits only bucket A and no rescues");
+  }
+  return { manifest, manifestKey: key, manifestSha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
 export function validateManifest(manifest) {
   if (manifest.schemaVersion !== "averray.signer-cleanup.v1" || !Array.isArray(manifest.rows)) throw new Error("Invalid cleanup manifest");
   const seen = new Set(); let last = -1;
@@ -140,10 +164,10 @@ export function classify(row, snapshot, signer = ADDRESSES.signer) {
   if (["A", "D"].includes(row.bucket) && snapshot.retired !== true) return result("blocked", "persisted_catalogue_retirement_required");
   return result("ready");
 }
-export function buildPlan(rows, position) {
-  const planHash = hash({ chainId: CHAIN_ID, contracts: ADDRESSES, ready: rows.filter(r => r.status === "ready").map(r => ({ call: r.call, preState: r.preState })) });
+export function buildPlan(rows, position, { manifestKey, manifestSha256 }) {
+  const planHash = hash({ manifestKey, manifestSha256, chainId: CHAIN_ID, contracts: ADDRESSES, ready: rows.filter(r => r.status === "ready").map(r => ({ call: r.call, preState: r.preState })) });
   const total = (key) => String(rows.reduce((n, r) => n + BigInt(r[key]), 0n));
-  return { chainId: CHAIN_ID, contracts: ADDRESSES, rows, position, planHash,
+  return { manifestKey, manifestSha256, chainId: CHAIN_ID, contracts: ADDRESSES, rows, position, planHash,
     totals: { bankLiquidRaw: total("expectedBankLiquidRaw"), bankReservedRaw: total("expectedBankReservedRaw"), coldLiquidRaw: total("expectedColdLiquidRaw") } };
 }
 export function assertCommit(plan, args) {
@@ -235,10 +259,15 @@ export async function executePlan(plan, args, io) {
   return { done, skipped, notDone, position };
 }
 
+function catalogueRecords(records, chainJobId) {
+  return records.filter(r => r.schemaVersion === 1 && typeof r.jobId === "string"
+    && equal(/^0x[0-9a-f]{64}$/i.test(r.jobId) ? r.jobId : id(r.jobId), chainJobId));
+}
+function isRetired(records) {
+  return records.some(r => ["archived", "paused"].includes(r.lifecycle?.status));
+}
 export function retirementFor(records, chainJobId) {
-  return records.some(r => r.schemaVersion === 1 && typeof r.jobId === "string"
-    && equal(/^0x[0-9a-f]{64}$/i.test(r.jobId) ? r.jobId : id(r.jobId), chainJobId)
-    && ["archived", "paused"].includes(r.lifecycle?.status));
+  return isRetired(catalogueRecords(records, chainJobId));
 }
 export function slashDistribution(row, job, treasury, verifierBps) {
   const stake = BigInt(job.claimStake), fee = BigInt(job.claimFee);
@@ -329,7 +358,11 @@ export async function createReader(provider, deployments, { readRetirements = as
       bindingsValid: equal(await contract.accounts(at), ADDRESSES.aac) && equal(policyAddress, deployments.contracts.treasuryPolicy) };
     if (row.bucket === "A") { snapshot.createdAt = await contract.createdAt(row.jobId, at); snapshot.minOpenAge = await contract.MIN_OPEN_FOR_CANCEL(at); }
     if (["B", "B'"].includes(row.bucket)) snapshot.disputeWindow = await contract.DISPUTE_WINDOW(at);
-    if (["A", "D"].includes(row.bucket)) snapshot.retired = retirementFor(await readRetirements(), row.jobId);
+    let records;
+    if (["A", "D"].includes(row.bucket)) {
+      records = await readRetirements();
+      snapshot.retired = retirementFor(records, row.jobId);
+    }
     if (["B", "B'", "D"].includes(row.bucket)) {
       // Earliest escrow deployment is a conservative lower bound for both
       // generations. Hub does not serve EVM headers back to Substrate genesis.
@@ -337,13 +370,19 @@ export async function createReader(provider, deployments, { readRetirements = as
         slashes: slashDistribution(row, job, await aac.treasuryAccount(at),
           await new Contract(policyAddress, policyAbi, provider).claimFeeVerifierBps(at)) };
     }
-    return observed(classify(row, snapshot));
+    const result = classify(row, snapshot);
+    if (result.reason === "persisted_catalogue_retirement_required") {
+      const record = catalogueRecords(records, row.jobId)[0];
+      result.catalogueId = record?.jobId ?? (await readSession?.(row.jobId))?.jobId ?? "not reported";
+      result.hasCatalogueRecord = Boolean(record);
+    }
+    return observed(result);
   };
   return { read, position, simulate: row => simulateReadyRow(provider, row, "latest") };
 }
 export function parseArgs(argv) {
   const args = { commit: false };
-  const values = { "--profile": "profile", "--expected-signer": "expectedSigner", "--expected-plan-hash": "expectedPlanHash", "--confirm": "confirm" };
+  const values = { "--manifest": "manifestKey", "--profile": "profile", "--expected-signer": "expectedSigner", "--expected-plan-hash": "expectedPlanHash", "--confirm": "confirm" };
   for (let n = 0; n < argv.length; n++) {
     const flag = argv[n];
     if (values[flag]) { const value = argv[++n]; if (!value || value.startsWith("--")) throw new Error(`Missing ${flag}`); args[values[flag]] = value; }
@@ -352,31 +391,56 @@ export function parseArgs(argv) {
     else if (flag === "--use-kms") args.useKms = true;
     else throw new Error(`Unknown argument ${flag}`);
   }
+  manifestFile(args.manifestKey);
   if (args.profile !== "mainnet") throw new Error("Only --profile mainnet is in scope");
   if (args.commit && (!args.useKms || !args.expectedSigner || !args.expectedPlanHash || !args.confirm)) throw new Error("Commit requires KMS, expected signer, reviewed plan hash and confirmation");
   return args;
 }
 export function rescueCommands(manifest) {
+  if (manifest.rescueJobIds.length === 0) return null;
   const common = `node scripts/ops/rescue-open-job.mjs --profile mainnet --escrow legacy --job-ids ${manifest.rescueJobIds.join(",")} --janitor "\${JANITOR:?set the dedicated janitor address}" --expected-signer ${ADDRESSES.signer}`;
   return { prepare: `${common} --phase prepare`, finalize: `${common} --phase finalize`,
     blocked: "D remains blocked: these combined commands are NOT executable until a separately reviewed same-session reopen/rescue integration exists. Catalogue retirement alone cannot prevent direct legacy claims.",
     execution: "Each is a separate dry-run and combined plan. Add --use-kms --execute --expected-plan-hash <combined hash> --confirm 'RESCUE <combined hash>' (or FINALIZE).",
     earliestFinalize: "For each job: actual prepare JobRejected block timestamp + live DISPUTE_WINDOW + 1 second (currently 7 days). Finalize dry-run prints the exact chain-derived time; not the cleanup time." };
 }
-export async function main(argv = process.argv.slice(2)) {
+export function reportDryRun(plan, catalogueStoreAvailable, log) {
+  const missingCatalogueRecordCount = catalogueStoreAvailable
+    ? plan.rows.filter(row => row.hasCatalogueRecord === false).length
+    : null;
+  log({
+    type: "dry_run", noKms: true, noTransactions: true, missingCatalogueRecordCount,
+    catalogueNote: missingCatalogueRecordCount > 0
+      ? "Stop and report the missing catalogue records to Pascal and Claude before committing this batch."
+      : "A requires persisted paused/archived catalogue records. D requires same-session rescue integration."
+  });
+}
+
+function rpcProvider(request) {
+  return new JsonRpcProvider(request, CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 });
+}
+
+async function kmsSigner(provider) {
+  const { KmsSigner } = await import("../../mcp-server/src/blockchain/kms-signer.js");
+  return new KmsSigner({ keyId: process.env.KMS_KEY_ID, region: process.env.AWS_REGION, provider });
+}
+
+export async function main(argv = process.argv.slice(2), {
+  makeProvider = rpcProvider, makeReader = createReader, makeSigner = kmsSigner,
+  log = value => console.log(json(value))
+} = {}) {
   const args = parseArgs(argv);
   const deployments = JSON.parse(await readFile(new URL("../../deployments/mainnet.json", import.meta.url), "utf8"));
-  const manifest = JSON.parse(await readFile(new URL("./signer-cleanup-2026-10.json", import.meta.url), "utf8"));
-  validateManifest(manifest);
+  const selection = await loadManifest(args.manifestKey);
+  const { manifest } = selection;
   const expected = getAddress(args.expectedSigner ?? deployments.verifier);
   if (!equal(expected, ADDRESSES.signer) || !equal(deployments.verifier, expected)) throw new Error("Unexpected cleanup signer");
   for (const [name, key] of Object.entries({ v3: "escrowCore", v2: "legacyEscrowCore", aac: "agentAccountCore", adapter: "aacPoolAggregatorAdapter", pool: "depositPoolV21" })) {
     if (!equal(deployments.contracts[key], ADDRESSES[name])) throw new Error(`Deployment binding changed: ${key}`);
   }
   const request = new FetchRequest(deployments.rpcUrl); request.timeout = 10_000;
-  const provider = new JsonRpcProvider(request, CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 });
+  const provider = makeProvider(request);
   let store;
-  const log = (value) => console.log(json(value));
   try {
     if (Number(BigInt(await provider.send("eth_chainId", []))) !== CHAIN_ID) throw new Error("Wrong chain");
     if (args.nonceCheck) { log({ type: "signer_nonce", at: new Date().toISOString(), ...await assertNonceIdle(provider) }); return; }
@@ -385,20 +449,23 @@ export async function main(argv = process.argv.slice(2)) {
       const { createStateStore } = await import("../../mcp-server/src/core/state-store.js");
       store = createStateStore();
     }
-    const io = await createReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]),
+    const io = await makeReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]),
       readSession: store ? jobId => store.findSessionByChainJobId(jobId) : undefined });
     const rows = [];
     for (const row of manifest.rows) { const result = await io.read(row); rows.push(result); log({ type: "row", ...result }); }
-    const plan = buildPlan(rows, await io.position());
-    log({ type: "plan", chainId: plan.chainId, contracts: plan.contracts, position: plan.position, totals: plan.totals, planHash: plan.planHash });
-    log({ type: "rescue_next_steps", ...rescueCommands(manifest) });
-    if (!args.commit) { log({ type: "dry_run", noKms: true, noTransactions: true, catalogueNote: "A requires persisted paused/archived catalogue records. D is blocked pending same-session rescue integration, even if retired or absent from the catalogue." }); return plan; }
+    const plan = buildPlan(rows, await io.position(), selection);
+    log({ type: "plan", manifestKey: plan.manifestKey, manifestSha256: plan.manifestSha256, chainId: plan.chainId, contracts: plan.contracts, position: plan.position, totals: plan.totals, planHash: plan.planHash });
+    const rescue = rescueCommands(manifest);
+    if (rescue) log({ type: "rescue_next_steps", ...rescue });
+    if (!args.commit) {
+      reportDryRun(plan, Boolean(store), log);
+      return plan;
+    }
     assertCommit(plan, args);
     if (!plan.rows.some(r => r.status === "ready")) { log({ type: "no_op", reason: "no_ready_rows" }); return plan; }
     await assertNonceIdle(provider);
     // Dynamic import and signer construction occur only AFTER all commit gates.
-    const { KmsSigner } = await import("../../mcp-server/src/blockchain/kms-signer.js");
-    const signer = new KmsSigner({ keyId: process.env.KMS_KEY_ID, region: process.env.AWS_REGION, provider });
+    const signer = await makeSigner(provider);
     if (!equal(await signer.getAddress(), expected)) throw new Error("KMS signer mismatch");
     return await executePlan(plan, args, { ...io, now: Date.now, log, assertNonceIdle: () => assertNonceIdle(provider),
       send: (call) => new Contract(call.to, call.function === "deallocateIdleFunds" ? accountAbi : escrowAbi, signer)[call.function](...call.args) });
